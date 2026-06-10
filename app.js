@@ -10,6 +10,8 @@ const DEFAULT_STATE = {
   checkins: [],           // {date, energy(1-5), sleep(hrs), pains:[{area,sev(0-3)}], note}
   measurements: [],       // {date, weight, waist, chest, arm}
   nutrition: [],          // {date, protein(g), _m}
+  equipment: { dumbbells: false, suspension: false }, // bands + pull-up bar + rower assumed
+  swaps: {},              // exId -> replacement exId (persistent)
 };
 
 let S = load();
@@ -22,6 +24,8 @@ function load() {
     const s = Object.assign(structuredClone(DEFAULT_STATE), parsed);
     s.profile = Object.assign({}, DEFAULT_STATE.profile, s.profile); // backfill new profile fields
     if (!Array.isArray(s.nutrition)) s.nutrition = [];
+    s.equipment = Object.assign({}, DEFAULT_STATE.equipment, s.equipment);
+    if (!s.swaps || typeof s.swaps !== "object") s.swaps = {};
     return s;
   } catch (e) { return structuredClone(DEFAULT_STATE); }
 }
@@ -83,7 +87,7 @@ function mergeStates(a, b) {
   out.checkins = mergeByKey(a.checkins, b.checkins, "date");
   out.measurements = mergeByKey(a.measurements, b.measurements, "date");
   out.nutrition = mergeByKey(a.nutrition, b.nutrition, "date");
-  if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.programIndex = b.programIndex; out._m = b._m; }
+  if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.programIndex = b.programIndex; out.equipment = b.equipment; out.swaps = b.swaps; out._m = b._m; }
   return out;
 }
 
@@ -123,6 +127,41 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 /* ---------- domain helpers ---------- */
 function nextSessionKey() { return SESSION_ORDER[S.programIndex % SESSION_ORDER.length]; }
 function exFlat(sessionKey) { return SESSIONS[sessionKey].blocks.flatMap((b) => b.ex); }
+function resolveEx(exId) { return (S.swaps && S.swaps[exId]) || exId; }
+function dumbbellMode(ex) { return S.equipment && S.equipment.dumbbells && ex.load === "band" && /curl|press|fly|row|squat|rdl|pressdown/i.test(ex.name + " " + (ex.cat || "")); }
+
+// Auto-progression: concrete per-set targets from history + today's readiness.
+function prescribe(exId) {
+  const ex = EXERCISES[exId];
+  const last = lastEntry(exId);
+  const ci = todaysCheckin();
+  const lowEnergy = ci && ci.energy && ci.energy <= 2;
+  const setsCount = Math.max(1, ex.target.sets - (lowEnergy ? 1 : 0));
+  if (!last) {
+    const base = ex.load === "time" ? ex.target.sec : ex.target.lo;
+    return { setsCount, perSet: Array.from({ length: setsCount }, () => ({ reps: base, last: null, load: null })), note: "Baseline — find a clean working weight" };
+  }
+  const lastSets = last.entry.sets.filter((s) => s.reps != null || s.load != null);
+  const perSet = [];
+  let anyAdd = false;
+  for (let i = 0; i < setsCount; i++) {
+    const ls = lastSets[i] || lastSets[lastSets.length - 1] || {};
+    const lastReps = ls.reps != null ? +ls.reps : null;
+    if (ex.load === "time") {
+      const t = lastReps || ex.target.sec;
+      perSet.push({ reps: t >= ex.target.sec ? t + 10 : ex.target.sec, last: lastReps, load: ls.load ?? null });
+    } else {
+      const r = lastReps || ex.target.lo;
+      const hitTop = r >= ex.target.hi && (!ls.rpe || ls.rpe <= 8);
+      if (hitTop) anyAdd = true;
+      perSet.push({ reps: hitTop ? ex.target.lo : Math.min(ex.target.hi, r + 1), last: lastReps, load: ls.load ?? null, addLoad: hitTop });
+    }
+  }
+  const note = anyAdd ? "Cleared the range — add load this time"
+    : lowEnergy ? "Low energy — one less set, keep form"
+    : ex.load === "time" ? "Beat last time's hold" : "Beat last time's reps";
+  return { setsCount, perSet, note };
+}
 
 function lastEntry(exId) {
   for (let i = S.workouts.length - 1; i >= 0; i--) {
@@ -383,21 +422,23 @@ function renderToday() {
 
   for (const blk of sess.blocks) {
     html += `<div class="blk-title"><span class="dot"></span>${esc(blk.title)}</div><div class="card">`;
-    for (const exId of blk.ex) {
+    for (const rawId of blk.ex) {
+      const exId = resolveEx(rawId);
       const ex = EXERCISES[exId];
       const sg = suggest(exId);
       const last = lastLabel(exId);
+      const swapped = exId !== rawId ? `<span class="pill">swapped</span>` : "";
       html += `<div class="ex">
         <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${targetLabel(ex)}</span></div>
         <div class="cue">${esc(ex.cue)}</div>
-        <div class="meta">${sg.text === "No history yet" ? "" : `<span class="pill ${sg.lvl}">${esc(sg.text)}</span>`}${demoLink(ex)}</div>
+        <div class="meta">${sg.text === "No history yet" ? "" : `<span class="pill ${sg.lvl}">${esc(sg.text)}</span>`}${swapped}${demoLink(ex)}</div>
         ${last ? `<div class="lastnote">${esc(last)}</div>` : ""}
       </div>`;
     }
     html += `</div>`;
   }
   VIEW.innerHTML = html;
-  document.getElementById("start-log").onclick = () => openLog(key);
+  document.getElementById("start-log").onclick = () => startRun(key);
   document.getElementById("switch-sess").onclick = () => {
     const cur = SESSION_ORDER.indexOf(key);
     S.programIndex = (cur + 1) % SESSION_ORDER.length; S._m = Date.now(); save(); renderToday();
@@ -407,99 +448,129 @@ function renderToday() {
   if (pset) pset.onchange = (e) => { const v = e.target.value.trim(); if (v !== "") { setProtein(Number(v)); renderToday(); } };
 }
 
-/* ---------- LOGGING ---------- */
-function setRowHTML(ex, exId, i, prev) {
+/* ---------- GUIDED WORKOUT RUNNER ---------- */
+let RUN = null; // { key, list:[exId], idx, startTs, data:{exId:sets[]} }
+
+function startRun(key) {
+  RUN = { key, list: exFlat(key).map(resolveEx), idx: 0, startTs: Date.now(), data: {} };
+  renderRunner();
+}
+function prescribeLvl(p) { return /add load/i.test(p.note) ? "good" : /low energy/i.test(p.note) ? "warn" : "acc"; }
+function runnerLoadCell(ex, i, val) {
+  if (ex.load === "reps" || !ex.load) return `<div class="tiny muted center">BW</div>`;
+  if (ex.load === "time") return `<input data-set="${i}" data-f="load" placeholder="—" value="${esc(val ?? "")}" />`;
+  const db = dumbbellMode(ex);
+  const ph = ex.load === "band" ? (db ? "lb" : "band") : "lb";
+  const im = (ex.load === "band" && !db) ? "" : "inputmode=\"decimal\"";
+  return `<input data-set="${i}" data-f="load" ${im} placeholder="${ph}" value="${esc(val ?? "")}" />`;
+}
+
+function renderRunner() {
+  if (!RUN) return setTab("today");
+  const total = RUN.list.length;
+  const exId = RUN.list[RUN.idx];
+  const ex = EXERCISES[exId];
   const timed = ex.load === "time";
-  const repsPh = timed ? (ex.target.sec || "") : "";
-  const repsVal = prev && prev.reps != null ? prev.reps : "";
-  const loadVal = prev && prev.load != null ? prev.load : "";
-  let loadCell = "";
-  if (ex.load === "band") loadCell = `<input data-ex="${exId}" data-set="${i}" data-f="load" placeholder="band" value="${esc(loadVal)}" />`;
-  else if (ex.load === "weight" || ex.load === "reps+load") loadCell = `<input data-ex="${exId}" data-set="${i}" data-f="load" inputmode="decimal" placeholder="lb" value="${esc(loadVal)}" />`;
-  else loadCell = `<div class="tiny muted center">BW</div>`;
-  const rpe = prev && prev.rpe ? prev.rpe : "";
-  return `<div class="setrow">
-    <div class="idx">${i + 1}</div>
-    <input data-ex="${exId}" data-set="${i}" data-f="reps" inputmode="numeric" placeholder="${timed ? "sec" : "reps"}" value="${esc(repsVal)}" />
-    ${loadCell}
-    <select data-ex="${exId}" data-set="${i}" data-f="rpe">
-      <option value="">RPE</option>
-      ${[6,7,8,9,10].map((n) => `<option ${rpe == n ? "selected" : ""}>${n}</option>`).join("")}
-    </select>
-  </div>`;
-}
+  const pres = prescribe(exId);
+  const existing = RUN.data[exId];
+  const elapsed = Math.round((Date.now() - RUN.startTs) / 60000);
+  TITLE.textContent = `Session ${RUN.key}`;
+  SUB.textContent = `Exercise ${RUN.idx + 1} / ${total} · ${elapsed} min`;
 
-function openLog(key) {
-  const sess = SESSIONS[key];
-  TITLE.textContent = "Log · " + key;
-  SUB.textContent = sess.name.replace(/^[A-C] · /, "");
-  let html = `<div class="card tight small muted">Reps · load · RPE (6–10). Pre-filled with last session.</div>
-    <div class="restchips"><span class="label">Rest timer</span>${[60, 90, 120].map((s) => `<button class="qbtn" data-rest="${s}">${fmtClock(s)}</button>`).join("")}</div>`;
-  for (const blk of sess.blocks) {
-    html += `<div class="blk-title"><span class="dot"></span>${esc(blk.title)}</div>`;
-    for (const exId of blk.ex) {
-      const ex = EXERCISES[exId];
-      const last = lastEntry(exId);
-      const prevSets = last ? last.entry.sets : [];
-      let ladder = "";
-      if (ex.ladder) {
-        const cur = last && last.entry.variation;
-        ladder = `<label class="fld"><span class="lt">Variation</span>
-          <select data-ex="${exId}" data-var="1">
-            ${ex.ladder.map((v) => `<option ${cur === v ? "selected" : ""}>${esc(v)}</option>`).join("")}
-          </select></label>`;
-      }
-      let rows = "";
-      for (let i = 0; i < ex.target.sets; i++) rows += setRowHTML(ex, exId, i, prevSets[i]);
-      html += `<div class="card">
-        <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${targetLabel(ex)}</span></div>
-        <div class="cue">${esc(ex.cue)}</div>
-        <div class="meta">${demoLink(ex)}</div>
-        ${ladder}
-        <div class="sets">${rows}</div>
-      </div>`;
-    }
+  let rows = "";
+  for (let i = 0; i < pres.setsCount; i++) {
+    const p = pres.perSet[i] || {};
+    const ev = existing && existing[i];
+    const repsVal = ev && ev.reps != null ? ev.reps : (p.last ?? "");
+    const loadVal = ev && ev.load != null ? ev.load : (p.load ?? "");
+    const rpeVal = ev && ev.rpe ? ev.rpe : "";
+    const tgt = timed ? `${p.reps}s` : `${p.reps}${p.addLoad ? " +load" : ""}`;
+    rows += `<div class="setrow">
+      <div class="idx">${i + 1}</div>
+      <input data-set="${i}" data-f="reps" inputmode="numeric" placeholder="${timed ? "sec" : "reps"}" value="${esc(repsVal)}" />
+      ${runnerLoadCell(ex, i, loadVal)}
+      <select data-set="${i}" data-f="rpe"><option value="">RPE</option>${[6,7,8,9,10].map((n) => `<option ${rpeVal == n ? "selected" : ""}>${n}</option>`).join("")}</select>
+    </div>
+    <div class="settarget">target ${esc(String(tgt))}</div>`;
   }
-  html += `<label class="fld"><span class="lt">Session note (optional)</span>
-    <textarea id="log-note" rows="2" placeholder="Notes for the weekly review"></textarea></label>
-    <button class="btn good" id="save-log" style="margin-top:14px">Finish &amp; save workout</button>
-    <button class="btn ghost" id="cancel-log" style="margin-top:8px">Cancel</button>`;
-
-  VIEW.innerHTML = `<div id="log-form">${html}</div>`;
+  let ladder = "";
+  if (ex.ladder) {
+    const cur = (existing && existing.variation) || (lastEntry(exId) && lastEntry(exId).entry.variation);
+    ladder = `<label class="fld"><span class="lt">Variation</span><select id="run-var">${ex.ladder.map((v) => `<option ${cur === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`;
+  }
+  const pct = Math.round((RUN.idx / total) * 100);
+  VIEW.innerHTML = `
+    <div class="runbar"><div class="runbar-fill" style="width:${pct}%"></div></div>
+    <div class="card">
+      <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${targetLabel(ex)}</span></div>
+      <div class="cue">${esc(ex.cue)}</div>
+      <div class="meta"><span class="pill ${prescribeLvl(pres)}">${esc(pres.note)}</span>${demoLink(ex)}<button class="linkbtn" id="run-swap">Swap →</button></div>
+      ${ladder}
+      <div class="sets">${rows}</div>
+    </div>
+    <div id="swap-panel"></div>
+    <div class="restchips"><span class="label">Rest</span>${[60, 90, 120].map((s) => `<button class="qbtn" data-rest="${s}">${fmtClock(s)}</button>`).join("")}</div>
+    <div class="runnav">
+      ${RUN.idx > 0 ? `<button class="btn ghost" id="run-prev">← Prev</button>` : `<button class="btn ghost" id="run-cancel">Cancel</button>`}
+      ${RUN.idx < total - 1 ? `<button class="btn" id="run-next">Next →</button>` : `<button class="btn good" id="run-finish">Finish &amp; save</button>`}
+    </div>`;
   window.scrollTo(0, 0);
-  document.getElementById("cancel-log").onclick = () => setTab("today");
-  document.getElementById("save-log").onclick = () => saveLog(key);
   document.querySelectorAll("[data-rest]").forEach((b) => b.onclick = () => startRest(+b.dataset.rest));
+  const prev = document.getElementById("run-prev"); if (prev) prev.onclick = () => { captureRun(exId); RUN.idx--; renderRunner(); };
+  const cancel = document.getElementById("run-cancel"); if (cancel) cancel.onclick = () => { RUN = null; stopRest(); setTab("today"); };
+  const next = document.getElementById("run-next"); if (next) next.onclick = () => { captureRun(exId); RUN.idx++; renderRunner(); };
+  const fin = document.getElementById("run-finish"); if (fin) fin.onclick = () => { captureRun(exId); finishRun(); };
+  document.getElementById("run-swap").onclick = () => renderSwapPanel(exId);
 }
 
-function saveLog(key) {
-  const byEx = {};
-  document.querySelectorAll("#log-form .setrow input, #log-form .setrow select").forEach((inp) => {
-    const { ex, set, f } = inp.dataset;
-    if (ex == null) return;
-    byEx[ex] = byEx[ex] || { exId: ex, sets: [] };
-    const si = +set;
-    byEx[ex].sets[si] = byEx[ex].sets[si] || { reps: null, load: null, unit: null, rpe: null };
-    let val = inp.value.trim();
-    if (f === "reps") byEx[ex].sets[si].reps = val === "" ? null : Number(val);
-    else if (f === "load") byEx[ex].sets[si].load = val === "" ? null : val;
-    else if (f === "rpe") byEx[ex].sets[si].rpe = val === "" ? null : Number(val);
+function captureRun(exId) {
+  const sets = [];
+  document.querySelectorAll(".sets .setrow").forEach((row) => {
+    const reps = row.querySelector('[data-f="reps"]'), load = row.querySelector('[data-f="load"]'), rpe = row.querySelector('[data-f="rpe"]');
+    const i = +reps.dataset.set;
+    sets[i] = {
+      reps: reps.value.trim() === "" ? null : Number(reps.value),
+      load: load && load.value != null && load.value.trim() !== "" ? load.value.trim() : null,
+      unit: null,
+      rpe: rpe.value === "" ? null : Number(rpe.value),
+    };
   });
-  document.querySelectorAll("#log-form select[data-var]").forEach((sel) => {
-    if (byEx[sel.dataset.ex]) byEx[sel.dataset.ex].variation = sel.value;
+  RUN.data[exId] = sets;
+  const v = document.getElementById("run-var");
+  if (v) RUN.data[exId].variation = v.value;
+}
+
+function renderSwapPanel(exId) {
+  const alts = (typeof ALTS !== "undefined" && ALTS[exId]) || [];
+  const panel = document.getElementById("swap-panel");
+  if (!alts.length) { panel.innerHTML = `<div class="card tight tiny muted">No alternatives for this one.</div>`; return; }
+  panel.innerHTML = `<div class="card"><div class="lt">Swap to</div>${
+    alts.map((a) => `<button class="btn ghost" style="margin-top:8px" data-swap="${a}">${esc(EXERCISES[a].name)}</button>`).join("")
+  }<div class="tiny muted" style="margin-top:8px">Sticks for future sessions. Undo in More → Equipment.</div></div>`;
+  panel.querySelectorAll("[data-swap]").forEach((b) => b.onclick = () => {
+    const cur = RUN.list[RUN.idx];
+    const origId = exFlat(RUN.key).find((o) => resolveEx(o) === cur) || cur;
+    S.swaps[origId] = b.dataset.swap; S._m = Date.now(); save();
+    RUN.list[RUN.idx] = b.dataset.swap;
+    renderRunner();
   });
+}
 
-  const entries = Object.values(byEx)
-    .map((e) => { e.sets = e.sets.filter((s) => s && (s.reps != null || s.load != null)); return e; })
-    .filter((e) => e.sets.length);
-
+function finishRun() {
+  const entries = Object.entries(RUN.data).map(([exId, sets]) => {
+    const variation = sets.variation;
+    const clean = sets.filter((s) => s && (s.reps != null || s.load != null));
+    const e = { exId, sets: clean };
+    if (variation) e.variation = variation;
+    return e;
+  }).filter((e) => e.sets.length);
   if (!entries.length) { toast("Log at least one set"); return; }
-
-  const note = (document.getElementById("log-note").value || "").trim();
-  S.workouts.push({ id: Date.now(), date: today(), sessionKey: key, entries, note, _m: Date.now() });
-  S.programIndex = (SESSION_ORDER.indexOf(key) + 1) % SESSION_ORDER.length;
+  S.workouts.push({ id: Date.now(), date: today(), sessionKey: RUN.key, entries, note: "", _m: Date.now() });
+  S.programIndex = (SESSION_ORDER.indexOf(RUN.key) + 1) % SESSION_ORDER.length;
   S._m = Date.now();
   save();
+  stopRest();
+  RUN = null;
   toast("Workout saved");
   setTab("today");
 }
@@ -802,6 +873,14 @@ function renderMore() {
       <label class="btn ghost" style="margin-top:8px;display:block;text-align:center">Restore from backup
         <input type="file" id="bk-file" accept="application/json" style="display:none"/></label>
     </div>
+    <div class="blk-title"><span class="dot"></span>Equipment</div>
+    <div class="card">
+      <div class="tiny muted">Bands, pull-up bar, and rower are assumed. Toggle what else you have — it switches loaded moves to lb input.</div>
+      <div class="flags" id="equip-flags" style="margin-top:12px">
+        ${[["dumbbells", "Dumbbells"], ["suspension", "Suspension trainer"]].map(([k, l]) => `<button data-equip="${k}" class="flagbtn ${S.equipment[k] ? "on" : ""}">${l}</button>`).join("")}
+      </div>
+      ${Object.keys(S.swaps || {}).length ? `<button class="btn ghost" id="reset-swaps" style="margin-top:12px">Reset ${Object.keys(S.swaps).length} exercise swap(s)</button>` : ""}
+    </div>
     <div class="blk-title"><span class="dot"></span>Profile</div>
     <div class="card">
       <div class="grid2">
@@ -860,6 +939,12 @@ function renderMore() {
   if (offBtn) offBtn.onclick = () => {
     SY = { url: SY.url }; saveSync(); setSyncStatus("off"); toast("Disconnected"); renderMore();
   };
+  document.querySelectorAll("#equip-flags .flagbtn").forEach((b) => b.onclick = () => {
+    S.equipment[b.dataset.equip] = !S.equipment[b.dataset.equip];
+    S._m = Date.now(); save(); b.classList.toggle("on", S.equipment[b.dataset.equip]);
+  });
+  const rs = document.getElementById("reset-swaps");
+  if (rs) rs.onclick = () => { S.swaps = {}; S._m = Date.now(); save(); toast("Swaps reset"); renderMore(); };
   document.getElementById("reset").onclick = () => {
     if (confirm("Erase ALL workouts, check-ins, and measurements? This cannot be undone.")) {
       S = structuredClone(DEFAULT_STATE); save(); toast("Reset"); setTab("today");

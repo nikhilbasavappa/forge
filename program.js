@@ -206,3 +206,35 @@ const SESSIONS = {
 const SESSION_ORDER = ["A", "B", "C"];
 
 const PAIN_AREAS = ["Winged scapula / R shoulder blade", "L shoulder (old dislocation)", "Neck / upper back", "Lower back", "Other"];
+
+/* Swap alternatives — same muscle, different angle/equipment/load.
+ * Used by the one-tap swap (e.g., a movement aggravates the shoulder). */
+const ALTS = {
+  pullup_prog: ["trx_row", "band_row"],
+  trx_row: ["band_row", "pullup_prog"],
+  band_row: ["trx_row"],
+  band_press: ["pushup_prog", "band_fly"],
+  pushup_prog: ["band_press", "band_fly"],
+  band_fly: ["band_press", "pushup_prog"],
+  pike_pushup: ["band_press"],
+  band_pressdown: ["pushup_prog"],
+  band_curl: ["hammer_curl"],
+  hammer_curl: ["band_curl"],
+  face_pull: ["band_pull_apart", "prone_ytw"],
+  band_pull_apart: ["face_pull", "prone_ytw"],
+  prone_ytw: ["face_pull", "band_pull_apart"],
+  goblet_squat: ["split_squat"],
+  split_squat: ["goblet_squat"],
+  rdl: ["goblet_squat"],
+  calf_raise: [],
+  dead_bug: ["hollow_hold", "plank"],
+  hanging_knee: ["dead_bug", "hollow_hold"],
+  pallof: ["dead_bug"],
+  plank: ["hollow_hold", "dead_bug"],
+  hollow_hold: ["plank", "dead_bug"],
+  wall_slides: ["scap_pushup"],
+  scap_pushup: ["wall_slides"],
+  thoracic_open: ["wall_slides"],
+  row_steady: ["row_intervals"],
+  row_intervals: ["row_steady"],
+};
