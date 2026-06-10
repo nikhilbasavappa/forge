@@ -165,6 +165,45 @@ const EXERCISES = {
     cue: "30s hard / 60s easy. Strong, smooth strokes.",
     q: "rowing machine interval workout technique"
   },
+
+  // ---- Bodyweight / household substitutes (Phase 1, before bands/dumbbells) ----
+  chinup_prog: {
+    name: "Chin-Up Progression (biceps)", cat: "pull", load: "reps", target: { sets: 3, lo: 3, hi: 8 },
+    ladder: ["Dead hang (time)", "Scapular pull", "Negative chin (slow lower)", "Chair-assisted chin-up", "Full chin-up", "Weighted chin-up"],
+    cue: "Underhand grip (palms toward you) — loads the biceps hard plus the back. Lead the chest to the bar, control the lower. Your main biceps builder until you have load.",
+    q: "chin up progression beginner"
+  },
+  prone_row: {
+    name: "Prone Row / Bat Wing", cat: "pull", load: "reps", target: { sets: 3, lo: 10, hi: 15 },
+    cue: "Face-down, arms hanging. Row the elbows up high and squeeze the shoulder blades for a count. Rear delts and mid-back without a band.",
+    q: "prone row bat wing rear delt exercise"
+  },
+  diamond_pushup: {
+    name: "Diamond Push-Up (triceps)", cat: "push", load: "reps", target: { sets: 3, lo: 6, hi: 12 },
+    ladder: ["Hands elevated", "Knee diamond", "Full diamond", "Feet elevated"],
+    cue: "Hands together under the chest, elbows tracking back (not flared). Triceps focus — drop to hands-elevated if the shoulder complains.",
+    q: "diamond push up exercise"
+  },
+  deep_pushup: {
+    name: "Deep / Wide Push-Up (chest)", cat: "push", load: "reps", target: { sets: 3, lo: 8, hi: 12 },
+    cue: "Hands on books so the chest sinks below them — a deeper pec stretch — or go wide. Control the bottom. The bodyweight chest-fly stand-in.",
+    q: "deficit push up chest stretch"
+  },
+  backpack_curl: {
+    name: "Backpack Curl", cat: "pull", load: "weight", target: { sets: 3, lo: 10, hi: 15 },
+    cue: "Load a backpack with books or water jugs. Curl with elbows pinned, squeeze the top, slow lower. Add books to progress.",
+    q: "backpack biceps curl no weights"
+  },
+  sl_rdl: {
+    name: "Single-Leg RDL", cat: "legs", load: "reps", target: { sets: 3, lo: 8, hi: 12 }, side: true,
+    cue: "Hinge at the hip on one leg, back flat, free leg extending behind for balance. Feel the hamstring. Hold a backpack to load it.",
+    q: "single leg romanian deadlift bodyweight"
+  },
+  bird_dog: {
+    name: "Bird Dog (anti-rotation)", cat: "core", load: "reps", target: { sets: 3, lo: 8, hi: 10 }, side: true,
+    cue: "On all fours, extend opposite arm + leg without letting the hips rotate. Slow and braced. Anti-rotation core, no band needed.",
+    q: "bird dog exercise"
+  },
 };
 
 /* Sessions — a rotating A/B/C deck. Do "the next one" whenever you train,
@@ -210,26 +249,33 @@ const PAIN_AREAS = ["Winged scapula / R shoulder blade", "L shoulder (old disloc
 /* Swap alternatives — same muscle, different angle/equipment/load.
  * Used by the one-tap swap (e.g., a movement aggravates the shoulder). */
 const ALTS = {
-  pullup_prog: ["trx_row", "band_row"],
-  trx_row: ["band_row", "pullup_prog"],
-  band_row: ["trx_row"],
-  band_press: ["pushup_prog", "band_fly"],
-  pushup_prog: ["band_press", "band_fly"],
-  band_fly: ["band_press", "pushup_prog"],
-  pike_pushup: ["band_press"],
-  band_pressdown: ["pushup_prog"],
-  band_curl: ["hammer_curl"],
-  hammer_curl: ["band_curl"],
-  face_pull: ["band_pull_apart", "prone_ytw"],
-  band_pull_apart: ["face_pull", "prone_ytw"],
-  prone_ytw: ["face_pull", "band_pull_apart"],
+  pullup_prog: ["chinup_prog", "trx_row", "band_row"],
+  trx_row: ["band_row", "prone_row", "pullup_prog"],
+  band_row: ["trx_row", "prone_row"],
+  band_press: ["pushup_prog", "band_fly", "deep_pushup"],
+  pushup_prog: ["band_press", "band_fly", "deep_pushup"],
+  band_fly: ["deep_pushup", "pushup_prog", "band_press"],
+  deep_pushup: ["pushup_prog", "band_fly"],
+  pike_pushup: ["band_press", "pushup_prog"],
+  band_pressdown: ["diamond_pushup", "pushup_prog"],
+  diamond_pushup: ["band_pressdown", "pushup_prog"],
+  band_curl: ["chinup_prog", "backpack_curl", "hammer_curl"],
+  hammer_curl: ["backpack_curl", "chinup_prog", "band_curl"],
+  chinup_prog: ["band_curl", "backpack_curl", "pullup_prog"],
+  backpack_curl: ["band_curl", "chinup_prog"],
+  face_pull: ["prone_row", "band_pull_apart", "prone_ytw"],
+  band_pull_apart: ["prone_ytw", "prone_row", "face_pull"],
+  prone_row: ["face_pull", "prone_ytw"],
+  prone_ytw: ["face_pull", "prone_row", "band_pull_apart"],
   goblet_squat: ["split_squat"],
-  split_squat: ["goblet_squat"],
-  rdl: ["goblet_squat"],
+  split_squat: ["goblet_squat", "sl_rdl"],
+  rdl: ["sl_rdl", "goblet_squat"],
+  sl_rdl: ["rdl", "split_squat"],
   calf_raise: [],
-  dead_bug: ["hollow_hold", "plank"],
+  dead_bug: ["bird_dog", "hollow_hold", "plank"],
   hanging_knee: ["dead_bug", "hollow_hold"],
-  pallof: ["dead_bug"],
+  pallof: ["bird_dog", "dead_bug"],
+  bird_dog: ["pallof", "dead_bug"],
   plank: ["hollow_hold", "dead_bug"],
   hollow_hold: ["plank", "dead_bug"],
   wall_slides: ["scap_pushup"],
@@ -237,4 +283,17 @@ const ALTS = {
   thoracic_open: ["wall_slides"],
   row_steady: ["row_intervals"],
   row_intervals: ["row_steady"],
+};
+
+/* One-tap "no bands yet" mode — maps band moves to bodyweight/household equivalents. */
+const BW_SWAPS = {
+  band_press: "pushup_prog",
+  band_fly: "deep_pushup",
+  band_pressdown: "diamond_pushup",
+  band_pull_apart: "prone_ytw",
+  face_pull: "prone_row",
+  band_curl: "chinup_prog",
+  hammer_curl: "backpack_curl",
+  pallof: "bird_dog",
+  rdl: "sl_rdl",
 };

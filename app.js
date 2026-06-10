@@ -129,6 +129,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 function nextSessionKey() { return SESSION_ORDER[S.programIndex % SESSION_ORDER.length]; }
 function exFlat(sessionKey) { return SESSIONS[sessionKey].blocks.flatMap((b) => b.ex); }
 function resolveEx(exId) { return (S.swaps && S.swaps[exId]) || exId; }
+function isBodyweightMode() { return typeof BW_SWAPS !== "undefined" && S.swaps && S.swaps.band_curl === BW_SWAPS.band_curl && S.swaps.band_press === BW_SWAPS.band_press; }
 function dumbbellMode(ex) { return S.equipment && S.equipment.dumbbells && ex.load === "band" && /curl|press|fly|row|squat|rdl|pressdown/i.test(ex.name + " " + (ex.cat || "")); }
 
 // Auto-progression: concrete per-set targets from history + today's readiness.
@@ -968,11 +969,12 @@ function renderMore() {
     </div>
     <div class="blk-title"><span class="dot"></span>Equipment</div>
     <div class="card">
-      <div class="tiny muted">Bands, pull-up bar, and rower are assumed. Toggle what else you have — it switches loaded moves to lb input.</div>
+      <div class="tiny muted">Pull-up bar and rower are assumed. No bands yet? Use bodyweight mode — it swaps every band move to a bodyweight/backpack version. Toggle gear as it arrives.</div>
+      <button class="btn ${isBodyweightMode() ? "" : "ghost"}" id="bw-mode" style="margin-top:12px">${isBodyweightMode() ? "Bodyweight mode ON — restore band program" : "No bands/dumbbells yet → bodyweight mode"}</button>
       <div class="flags" id="equip-flags" style="margin-top:12px">
         ${[["dumbbells", "Dumbbells"], ["suspension", "Suspension trainer"]].map(([k, l]) => `<button data-equip="${k}" class="flagbtn ${S.equipment[k] ? "on" : ""}">${l}</button>`).join("")}
       </div>
-      ${Object.keys(S.swaps || {}).length ? `<button class="btn ghost" id="reset-swaps" style="margin-top:12px">Reset ${Object.keys(S.swaps).length} exercise swap(s)</button>` : ""}
+      ${Object.keys(S.swaps || {}).length ? `<button class="btn ghost" id="reset-swaps" style="margin-top:12px">Reset all ${Object.keys(S.swaps).length} swap(s)</button>` : ""}
     </div>
     <div class="blk-title"><span class="dot"></span>Profile</div>
     <div class="card">
@@ -1036,6 +1038,12 @@ function renderMore() {
     S.equipment[b.dataset.equip] = !S.equipment[b.dataset.equip];
     S._m = Date.now(); save(); b.classList.toggle("on", S.equipment[b.dataset.equip]);
   });
+  const bw = document.getElementById("bw-mode");
+  if (bw) bw.onclick = () => {
+    if (isBodyweightMode()) { for (const k of Object.keys(BW_SWAPS)) delete S.swaps[k]; toast("Band program restored"); }
+    else { S.swaps = Object.assign({}, S.swaps, BW_SWAPS); toast("Bodyweight mode on"); }
+    S._m = Date.now(); save(); renderMore();
+  };
   const rs = document.getElementById("reset-swaps");
   if (rs) rs.onclick = () => { S.swaps = {}; S._m = Date.now(); save(); toast("Swaps reset"); renderMore(); };
   document.getElementById("reset").onclick = () => {
