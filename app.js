@@ -12,6 +12,7 @@ const DEFAULT_STATE = {
   nutrition: [],          // {date, protein(g), _m}
   equipment: { dumbbells: false, suspension: false }, // bands + pull-up bar + rower assumed
   swaps: {},              // exId -> replacement exId (persistent)
+  deloadWeek: null,       // weekStart string when a deload week is active
 };
 
 let S = load();
@@ -87,7 +88,7 @@ function mergeStates(a, b) {
   out.checkins = mergeByKey(a.checkins, b.checkins, "date");
   out.measurements = mergeByKey(a.measurements, b.measurements, "date");
   out.nutrition = mergeByKey(a.nutrition, b.nutrition, "date");
-  if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.programIndex = b.programIndex; out.equipment = b.equipment; out.swaps = b.swaps; out._m = b._m; }
+  if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.programIndex = b.programIndex; out.equipment = b.equipment; out.swaps = b.swaps; out.deloadWeek = b.deloadWeek; out._m = b._m; }
   return out;
 }
 
@@ -136,7 +137,9 @@ function prescribe(exId) {
   const last = lastEntry(exId);
   const ci = todaysCheckin();
   const lowEnergy = ci && ci.energy && ci.energy <= 2;
-  const setsCount = Math.max(1, ex.target.sets - (lowEnergy ? 1 : 0));
+  const deload = deloadActive();
+  let setsCount = Math.max(1, ex.target.sets - (lowEnergy ? 1 : 0));
+  if (deload) setsCount = Math.max(1, Math.ceil(ex.target.sets * 0.6));
   if (!last) {
     const base = ex.load === "time" ? ex.target.sec : ex.target.lo;
     return { setsCount, perSet: Array.from({ length: setsCount }, () => ({ reps: base, last: null, load: null })), note: "Baseline — find a clean working weight" };
@@ -156,6 +159,10 @@ function prescribe(exId) {
       if (hitTop) anyAdd = true;
       perSet.push({ reps: hitTop ? ex.target.lo : Math.min(ex.target.hi, r + 1), last: lastReps, load: ls.load ?? null, addLoad: hitTop });
     }
+  }
+  if (deload) {
+    perSet.forEach((p) => { p.addLoad = false; if (p.last != null) p.reps = p.last; });
+    return { setsCount, perSet, note: "Deload — lighter, leave 2–3 reps in reserve" };
   }
   const note = anyAdd ? "Cleared the range — add load this time"
     : lowEnergy ? "Low energy — one less set, keep form"
@@ -257,6 +264,28 @@ function targetStreakWeeks() {
   }
   return streak;
 }
+
+/* ---------- deload / auto-regulation ---------- */
+function deloadActive() { return S.deloadWeek && S.deloadWeek === weekStartStr(new Date()); }
+function deloadReason() {
+  if (deloadActive()) return null;
+  const recent = S.checkins.filter((c) => daysAgo(c.date) <= 7);
+  const painDays = recent.filter((c) => (c.pains || []).some((p) => p.sev >= 2 && /scapula|shoulder/i.test(p.area))).length;
+  const lowDays = recent.filter((c) => c.energy && c.energy <= 2).length;
+  if (painDays >= 3) return "Shoulder flagged 3+ days this week — back off a week";
+  if (lowDays >= 3) return "Low energy 3+ days this week — take a lighter week";
+  const ws = weeklySessions(8);
+  let streak = 0;
+  for (let i = ws.length - 1; i >= 0; i--) { if (ws[i].count > 0) streak++; else break; }
+  if (streak >= 4) return `${streak} weeks straight — a deload will let you grow`;
+  return null;
+}
+function daysSinceLastWorkout() {
+  if (!S.workouts.length) return null;
+  return daysAgo(S.workouts[S.workouts.length - 1].date);
+}
+
+const PREHAB_ROUTINE = ["wall_slides", "scap_pushup", "band_pull_apart", "face_pull", "prone_ytw", "thoracic_open"];
 
 /* ---------- rest timer ---------- */
 let restInt = null, restEnd = 0;
@@ -405,6 +434,16 @@ function renderToday() {
       ${ci ? "" : `<div class="tip">Check in first to adjust today's targets.</div>`}
     </div>`;
 
+  // deload banner + nudges
+  if (deloadActive()) {
+    html += `<div class="banner warn"><div>Deload week active — lighter loads, full recovery.</div><button class="linkbtn" id="deload-off">End</button></div>`;
+  } else {
+    const dr = deloadReason();
+    if (dr) html += `<div class="banner"><div>${esc(dr)}</div><button class="linkbtn" id="deload-on">Start deload</button></div>`;
+  }
+  const dslw = daysSinceLastWorkout();
+  if (dslw != null && dslw >= 3) html += `<div class="banner"><div>${dslw} days since your last session.</div></div>`;
+
   // protein quick-logger
   const pt = proteinToday(), ptgt = S.profile.proteinTarget || 0;
   const ppct = ptgt ? Math.min(100, Math.round((pt / ptgt) * 100)) : 0;
@@ -429,7 +468,7 @@ function renderToday() {
       const last = lastLabel(exId);
       const swapped = exId !== rawId ? `<span class="pill">swapped</span>` : "";
       html += `<div class="ex">
-        <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${targetLabel(ex)}</span></div>
+        <div class="row"><div class="name tappable" data-exhist="${exId}">${esc(ex.name)} ›</div><span class="pill">${targetLabel(ex)}</span></div>
         <div class="cue">${esc(ex.cue)}</div>
         <div class="meta">${sg.text === "No history yet" ? "" : `<span class="pill ${sg.lvl}">${esc(sg.text)}</span>`}${swapped}${demoLink(ex)}</div>
         ${last ? `<div class="lastnote">${esc(last)}</div>` : ""}
@@ -437,8 +476,13 @@ function renderToday() {
     }
     html += `</div>`;
   }
+  html += `<button class="btn ghost" id="start-prehab" style="margin-top:20px">Daily prehab — off-day routine</button>`;
   VIEW.innerHTML = html;
   document.getElementById("start-log").onclick = () => startRun(key);
+  document.getElementById("start-prehab").onclick = () => startPrehab();
+  const dOn = document.getElementById("deload-on"); if (dOn) dOn.onclick = () => { S.deloadWeek = weekStartStr(new Date()); S._m = Date.now(); save(); toast("Deload week on"); renderToday(); };
+  const dOff = document.getElementById("deload-off"); if (dOff) dOff.onclick = () => { S.deloadWeek = null; S._m = Date.now(); save(); renderToday(); };
+  document.querySelectorAll("[data-exhist]").forEach((el) => el.onclick = () => renderExercise(el.dataset.exhist));
   document.getElementById("switch-sess").onclick = () => {
     const cur = SESSION_ORDER.indexOf(key);
     S.programIndex = (cur + 1) % SESSION_ORDER.length; S._m = Date.now(); save(); renderToday();
@@ -455,7 +499,11 @@ function startRun(key) {
   RUN = { key, list: exFlat(key).map(resolveEx), idx: 0, startTs: Date.now(), data: {} };
   renderRunner();
 }
-function prescribeLvl(p) { return /add load/i.test(p.note) ? "good" : /low energy/i.test(p.note) ? "warn" : "acc"; }
+function startPrehab() {
+  RUN = { key: "Prehab", list: PREHAB_ROUTINE.slice(), idx: 0, startTs: Date.now(), data: {}, isPrehab: true };
+  renderRunner();
+}
+function prescribeLvl(p) { return /add load/i.test(p.note) ? "good" : /low energy|deload/i.test(p.note) ? "warn" : "acc"; }
 function runnerLoadCell(ex, i, val) {
   if (ex.load === "reps" || !ex.load) return `<div class="tiny muted center">BW</div>`;
   if (ex.load === "time") return `<input data-set="${i}" data-f="load" placeholder="—" value="${esc(val ?? "")}" />`;
@@ -474,7 +522,7 @@ function renderRunner() {
   const pres = prescribe(exId);
   const existing = RUN.data[exId];
   const elapsed = Math.round((Date.now() - RUN.startTs) / 60000);
-  TITLE.textContent = `Session ${RUN.key}`;
+  TITLE.textContent = RUN.isPrehab ? "Daily prehab" : `Session ${RUN.key}`;
   SUB.textContent = `Exercise ${RUN.idx + 1} / ${total} · ${elapsed} min`;
 
   let rows = "";
@@ -556,7 +604,37 @@ function renderSwapPanel(exId) {
   });
 }
 
+function renderExercise(exId) {
+  const ex = EXERCISES[exId];
+  TITLE.textContent = ex.name;
+  SUB.textContent = "History · best sets";
+  const hist = [];
+  S.workouts.forEach((w) => { const e = w.entries.find((x) => x.exId === exId); if (e) hist.push({ date: w.date, sets: e.sets, variation: e.variation }); });
+  const pts = [];
+  hist.forEach((h) => { const top = Math.max(0, ...h.sets.map((s) => +s.reps || 0)); if (top) pts.push({ x: pts.length, y: top }); });
+  let pr = null;
+  hist.forEach((h) => h.sets.forEach((s) => { const r = +s.reps || 0; if (r && (!pr || r > pr.reps)) pr = { reps: r, load: s.load }; }));
+  const rows = hist.slice().reverse().map((h) => {
+    const sets = h.sets.map((s) => `${s.reps ?? "?"}${s.load ? "@" + s.load : ""}${s.rpe ? " (RPE" + s.rpe + ")" : ""}`).join(", ");
+    return `<div class="row small" style="padding:8px 0;border-top:1px solid var(--line)"><span class="muted">${prettyDate(h.date)}${h.variation ? " · " + esc(h.variation) : ""}</span><span>${esc(sets)}</span></div>`;
+  }).join("");
+  VIEW.innerHTML = `
+    <button class="btn ghost sm" id="ex-back" style="margin:8px 0 6px">← Back</button>
+    <div class="card">
+      <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${targetLabel(ex)}</span></div>
+      <div class="cue">${esc(ex.cue)}</div>
+      <div class="meta">${demoLink(ex)}</div>
+    </div>
+    <div class="card">
+      <div class="row"><div class="name">Top-set reps</div>${pr ? `<span class="pill good">PR ${pr.reps}${pr.load ? "@" + esc(String(pr.load)) : ""}</span>` : ""}</div>
+      ${lineChart(pts, "#8A2B22")}
+    </div>
+    ${hist.length ? `<div class="card tight"><div class="small muted">History (${hist.length})</div>${rows}</div>` : `<div class="card tight tiny muted">No sessions logged yet.</div>`}`;
+  document.getElementById("ex-back").onclick = () => setTab("today");
+}
+
 function finishRun() {
+  if (RUN.isPrehab) { stopRest(); RUN = null; toast("Prehab done"); setTab("today"); return; }
   const entries = Object.entries(RUN.data).map(([exId, sets]) => {
     const variation = sets.variation;
     const clean = sets.filter((s) => s && (s.reps != null || s.load != null));
@@ -691,6 +769,7 @@ function renderProgress() {
 
   const wPoints = m.filter((x) => x.weight != null).map((x, i) => ({ x: i, y: +x.weight }));
   const ePoints = S.checkins.filter((c) => c.energy).map((c, i) => ({ x: i, y: c.energy }));
+  const rhrPoints = m.filter((x) => x.rhr != null).map((x, i) => ({ x: i, y: +x.rhr }));
 
   // a couple of key lift trends (top set reps)
   function liftPoints(exId) {
@@ -733,6 +812,12 @@ function renderProgress() {
       }).join("")}
       <div class="legend">${lifts.map(([id, c]) => `<span><i style="background:${c}"></i>${esc(EXERCISES[id].name.split(" ")[0])}</span>`).join("")}</div>
     </div>
+    <div class="blk-title"><span class="dot"></span>Health</div>
+    <div class="card">
+      <div class="row"><div class="name">Resting HR</div>
+        <span>${lastM && lastM.bpSys ? `<span class="pill">BP ${esc(lastM.bpSys)}/${esc(lastM.bpDia ?? "?")}</span> ` : ""}${lastM && lastM.readiness ? `<span class="pill">Ready ${esc(lastM.readiness)}</span>` : ""}</span></div>
+      ${lineChart(rhrPoints, "#16140F", { fmt: (v) => v + " bpm" })}
+    </div>
     <div class="blk-title"><span class="dot"></span>Log measurements</div>
     <div class="card">
       <div class="tiny muted">Weekly. Tape tracks recomposition better than scale weight.</div>
@@ -741,6 +826,13 @@ function renderProgress() {
         <label class="fld"><span class="lt">Waist (in)</span><input id="m-waist" inputmode="decimal" placeholder="${esc(lastM?.waist ?? "")}"/></label>
         <label class="fld"><span class="lt">Chest (in)</span><input id="m-chest" inputmode="decimal" placeholder="${esc(lastM?.chest ?? "")}"/></label>
         <label class="fld"><span class="lt">Arm (in)</span><input id="m-arm" inputmode="decimal" placeholder="${esc(lastM?.arm ?? "")}"/></label>
+      </div>
+      <div class="lt" style="margin-top:18px">Health (optional)</div>
+      <div class="grid2">
+        <label class="fld"><span class="lt">Resting HR (bpm)</span><input id="m-rhr" inputmode="numeric" placeholder="${esc(lastM?.rhr ?? "")}"/></label>
+        <label class="fld"><span class="lt">Readiness (0–100)</span><input id="m-readiness" inputmode="numeric" placeholder="${esc(lastM?.readiness ?? "")}"/></label>
+        <label class="fld"><span class="lt">BP systolic</span><input id="m-bps" inputmode="numeric" placeholder="${esc(lastM?.bpSys ?? "")}"/></label>
+        <label class="fld"><span class="lt">BP diastolic</span><input id="m-bpd" inputmode="numeric" placeholder="${esc(lastM?.bpDia ?? "")}"/></label>
       </div>
       <button class="btn" id="save-m" style="margin-top:14px">Save measurements</button>
     </div>
@@ -767,10 +859,11 @@ function renderProgress() {
 
   document.getElementById("save-m").onclick = () => {
     const g = (id) => { const v = document.getElementById(id).value.trim(); return v === "" ? null : Number(v); };
-    const rec = { date: today(), weight: g("m-weight"), waist: g("m-waist"), chest: g("m-chest"), arm: g("m-arm"), _m: Date.now() };
-    if (rec.weight == null && rec.waist == null && rec.chest == null && rec.arm == null) { toast("Enter at least one"); return; }
+    const rec = { date: today(), weight: g("m-weight"), waist: g("m-waist"), chest: g("m-chest"), arm: g("m-arm"), rhr: g("m-rhr"), readiness: g("m-readiness"), bpSys: g("m-bps"), bpDia: g("m-bpd"), _m: Date.now() };
+    if (Object.entries(rec).filter(([k]) => k !== "date" && k !== "_m").every(([, v]) => v == null)) { toast("Enter at least one"); return; }
     const i = S.measurements.findIndex((x) => x.date === today());
-    if (i >= 0) S.measurements[i] = Object.assign(S.measurements[i], rec); else S.measurements.push(rec);
+    if (i >= 0) { for (const [k, v] of Object.entries(rec)) if (v != null) S.measurements[i][k] = v; S.measurements[i]._m = Date.now(); }
+    else S.measurements.push(rec);
     save(); toast("Measurements saved"); renderProgress();
   };
 }

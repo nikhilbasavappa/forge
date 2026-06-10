@@ -233,6 +233,15 @@ input::placeholder { color: var(--mut); opacity: 0.7; }
   font-family: var(--m); font-size: 0.72rem; letter-spacing: 0.08em; padding: 7px 10px; cursor: pointer;
 }
 
+/* banners / nudges */
+.banner {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  border: 1px solid var(--ink); padding: 11px 14px; margin: 0 0 12px;
+  font-family: var(--m); font-size: 0.76rem; letter-spacing: 0.02em;
+}
+.banner.warn { border-color: var(--ox); color: var(--ox); }
+.name.tappable { cursor: pointer; }
+
 /* guided runner */
 .runbar { height: 4px; background: var(--line); margin: 0 0 18px; }
 .runbar-fill { height: 100%; background: var(--ox); transition: width .25s; }
