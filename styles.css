@@ -193,5 +193,48 @@ label.fld .lt {
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(-3px); }
 
+/* big stat number (protein, adherence) */
+.bignum { font-family: var(--m); font-size: 1.9rem; font-weight: 700; letter-spacing: -0.02em; }
+.bignum .unit { font-size: 0.9rem; font-weight: 400; color: var(--mut); }
+
+/* progress bar */
+.pbar { height: 6px; background: var(--line); margin-top: 12px; }
+.pbar-fill { height: 100%; background: var(--ox); transition: width .25s; }
+
+/* quick-add row + buttons */
+.qadd { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+.qadd input { flex: 1; }
+.qbtn {
+  font-family: var(--m); font-size: 0.82rem; border: 1px solid var(--ink); background: var(--paper);
+  color: var(--ink); border-radius: 0; padding: 10px 12px; cursor: pointer; white-space: nowrap;
+}
+.qbtn:active { background: var(--ink); color: var(--paper); }
+
+/* rest timer */
+.restchips { display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; }
+.restchips .label { margin-right: 2px; }
+.rest-bar {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom) + 60px); z-index: 40;
+  display: flex; align-items: center; gap: 16px;
+  background: var(--ink); color: var(--paper); padding: 10px 14px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+}
+.rest-bar .rest-t { font-family: var(--m); font-size: 1.4rem; font-weight: 700; min-width: 64px; text-align: center; }
+.rest-bar .rest-x {
+  background: none; border: 1px solid var(--paper); color: var(--paper); border-radius: 0;
+  font-family: var(--m); font-size: 0.72rem; letter-spacing: 0.08em; padding: 7px 10px; cursor: pointer;
+}
+
+/* progress photos */
+.cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.cmp figure { margin: 0; }
+.cmp img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; border: 1px solid var(--line-2); }
+.cmp figcaption { font-family: var(--m); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--mut); margin-top: 5px; }
+.pgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 12px; }
+.pgrid figure { margin: 0; cursor: pointer; }
+.pgrid img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; border: 1px solid var(--line); }
+.pgrid figcaption { font-family: var(--m); font-size: 0.6rem; color: var(--mut); margin-top: 3px; text-align: center; }
+
 /* numerals in data contexts */
-.mast-letter, .pill, .lastnote, .sub, .setrow, .chart { font-variant-numeric: tabular-nums; }
+.mast-letter, .pill, .lastnote, .sub, .setrow, .chart, .bignum { font-variant-numeric: tabular-nums; }

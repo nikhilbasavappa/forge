@@ -1,5 +1,5 @@
 /* sw.js — offline app shell. Bump CACHE when files change to force update. */
-const CACHE = "forge-v4";
+const CACHE = "forge-v5";
 const ASSETS = [
   "./", "./index.html", "./styles.css", "./program.js", "./app.js",
   "./manifest.json", "./icon.svg",

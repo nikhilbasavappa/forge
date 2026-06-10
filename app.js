@@ -4,11 +4,12 @@
 const KEY = "forge.v1";
 const DEFAULT_STATE = {
   v: 1,
-  profile: { heightIn: 68, startWeight: 155 },
+  profile: { heightIn: 68, startWeight: 155, proteinTarget: 155, weeklyTarget: 4, restDefault: 90 },
   programIndex: 0,        // which session in SESSION_ORDER is next
   workouts: [],           // {id, date, sessionKey, entries:[{exId, variation, sets:[{reps,load,unit,rpe}]}], note}
   checkins: [],           // {date, energy(1-5), sleep(hrs), pains:[{area,sev(0-3)}], note}
   measurements: [],       // {date, weight, waist, chest, arm}
+  nutrition: [],          // {date, protein(g), _m}
 };
 
 let S = load();
@@ -18,7 +19,10 @@ function load() {
     const raw = localStorage.getItem(KEY);
     if (!raw) return structuredClone(DEFAULT_STATE);
     const parsed = JSON.parse(raw);
-    return Object.assign(structuredClone(DEFAULT_STATE), parsed);
+    const s = Object.assign(structuredClone(DEFAULT_STATE), parsed);
+    s.profile = Object.assign({}, DEFAULT_STATE.profile, s.profile); // backfill new profile fields
+    if (!Array.isArray(s.nutrition)) s.nutrition = [];
+    return s;
   } catch (e) { return structuredClone(DEFAULT_STATE); }
 }
 function save() { localStorage.setItem(KEY, JSON.stringify(S)); scheduleSync(); }
@@ -78,6 +82,7 @@ function mergeStates(a, b) {
   out.workouts = Object.values(w).sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : x.id - y.id));
   out.checkins = mergeByKey(a.checkins, b.checkins, "date");
   out.measurements = mergeByKey(a.measurements, b.measurements, "date");
+  out.nutrition = mergeByKey(a.nutrition, b.nutrition, "date");
   if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.programIndex = b.programIndex; out._m = b._m; }
   return out;
 }
@@ -170,6 +175,127 @@ function toast(msg) {
   clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 1800);
 }
 
+/* ---------- protein ---------- */
+function todaysNutrition() { return S.nutrition.find((n) => n.date === today()) || null; }
+function proteinToday() { const n = todaysNutrition(); return n ? (+n.protein || 0) : 0; }
+function addProtein(g) {
+  const i = S.nutrition.findIndex((n) => n.date === today());
+  if (i >= 0) S.nutrition[i] = { ...S.nutrition[i], protein: Math.max(0, (+S.nutrition[i].protein || 0) + g), _m: Date.now() };
+  else S.nutrition.push({ date: today(), protein: Math.max(0, g), _m: Date.now() });
+  save();
+}
+function setProtein(g) {
+  const i = S.nutrition.findIndex((n) => n.date === today());
+  const rec = { date: today(), protein: Math.max(0, g), _m: Date.now() };
+  if (i >= 0) S.nutrition[i] = rec; else S.nutrition.push(rec);
+  save();
+}
+
+/* ---------- adherence (week math) ---------- */
+function mondayOf(d) { const x = new Date(d); const day = (x.getDay() + 6) % 7; x.setHours(0,0,0,0); x.setDate(x.getDate() - day); return x; }
+function weekStartStr(d) { return toDate(mondayOf(d).getTime()); }
+// sessions grouped by week-start; returns last `n` weeks oldest→newest as {week, count}
+function weeklySessions(n) {
+  const counts = {};
+  S.workouts.forEach((w) => { const k = weekStartStr(new Date(w.date.replace(/-/g, "/"))); counts[k] = (counts[k] || 0) + 1; });
+  const out = [];
+  const base = mondayOf(new Date());
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(base); d.setDate(d.getDate() - i * 7);
+    const k = toDate(d.getTime());
+    out.push({ week: k, count: counts[k] || 0 });
+  }
+  return out;
+}
+function sessionsThisWeek() { const k = weekStartStr(new Date()); return S.workouts.filter((w) => weekStartStr(new Date(w.date.replace(/-/g, "/"))) === k).length; }
+function targetStreakWeeks() {
+  const tgt = S.profile.weeklyTarget || 4;
+  const wk = weeklySessions(16);
+  let streak = 0;
+  for (let i = wk.length - 1; i >= 0; i--) {
+    if (i === wk.length - 1 && wk[i].count < tgt) continue; // current week not yet met → don't break streak
+    if (wk[i].count >= tgt) streak++; else break;
+  }
+  return streak;
+}
+
+/* ---------- rest timer ---------- */
+let restInt = null, restEnd = 0;
+function fmtClock(s) { s = Math.max(0, Math.ceil(s)); return `${Math.floor(s / 60)}:${pad(s % 60)}`; }
+function restBeep() {
+  try {
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.connect(g); g.connect(ac.destination); o.frequency.value = 880; o.type = "sine";
+    g.gain.setValueAtTime(0.001, ac.currentTime); g.gain.exponentialRampToValueAtTime(0.3, ac.currentTime + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.5);
+    o.start(); o.stop(ac.currentTime + 0.5);
+  } catch (e) {}
+}
+function stopRest() { if (restInt) clearInterval(restInt); restInt = null; const b = document.getElementById("rest-bar"); if (b) b.remove(); }
+function startRest(sec) {
+  stopRest();
+  restEnd = Date.now() + sec * 1000;
+  let bar = document.createElement("div");
+  bar.id = "rest-bar"; bar.className = "rest-bar";
+  bar.innerHTML = `<button class="rest-x" id="rest-skip">SKIP</button>
+    <span class="rest-t" id="rest-t">${fmtClock(sec)}</span>
+    <button class="rest-x" id="rest-add">+30s</button>`;
+  document.body.appendChild(bar);
+  document.getElementById("rest-skip").onclick = stopRest;
+  document.getElementById("rest-add").onclick = () => { restEnd += 30000; };
+  const tick = () => {
+    const left = (restEnd - Date.now()) / 1000;
+    const t = document.getElementById("rest-t"); if (t) t.textContent = fmtClock(left);
+    if (left <= 0) { restBeep(); if (navigator.vibrate) navigator.vibrate([200, 100, 200]); stopRest(); }
+  };
+  restInt = setInterval(tick, 250); tick();
+}
+
+/* ---------- progress photos (IndexedDB; local-only, not synced) ---------- */
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open("forge-media", 1);
+    r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains("photos")) r.result.createObjectStore("photos", { keyPath: "date" }); };
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+async function idbPut(p) { const db = await idbOpen(); return new Promise((res, rej) => { const t = db.transaction("photos", "readwrite"); t.objectStore("photos").put(p); t.oncomplete = () => res(); t.onerror = () => rej(t.error); }); }
+async function idbAll() { const db = await idbOpen(); return new Promise((res, rej) => { const t = db.transaction("photos", "readonly"); const q = t.objectStore("photos").getAll(); q.onsuccess = () => res(q.result || []); q.onerror = () => rej(q.error); }); }
+async function idbDel(date) { const db = await idbOpen(); return new Promise((res, rej) => { const t = db.transaction("photos", "readwrite"); t.objectStore("photos").delete(date); t.oncomplete = () => res(); t.onerror = () => rej(t.error); }); }
+function compressImage(file, maxDim = 1080, q = 0.72) {
+  return new Promise((res) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const c = document.createElement("canvas"); c.width = w; c.height = h;
+      c.getContext("2d").drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(img.src);
+      res(c.toDataURL("image/jpeg", q));
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+/* ---------- bar chart (inline SVG) ---------- */
+function barChart(items, color, target) {
+  if (!items.length) return `<div class="chart-empty">No data yet.</div>`;
+  const W = 320, H = 96, pb = 16, gap = 4;
+  const max = Math.max(target || 0, ...items.map((i) => i.v), 1);
+  const bw = (W - gap * (items.length - 1)) / items.length;
+  let bars = "";
+  items.forEach((it, i) => {
+    const h = (it.v / max) * (H - pb);
+    const x = i * (bw + gap);
+    bars += `<rect x="${x.toFixed(1)}" y="${(H - pb - h).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" fill="${it.hi ? color : "#C7BFAC"}"/>`;
+    bars += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 4}" fill="#837B6A" font-size="8" text-anchor="middle">${esc(it.label)}</text>`;
+  });
+  let tline = "";
+  if (target) { const y = (H - pb) - (target / max) * (H - pb); tline = `<line x1="0" y1="${y.toFixed(1)}" x2="${W}" y2="${y.toFixed(1)}" stroke="${color}" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>`; }
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}${tline}</svg>`;
+}
+
 /* ---------- router ---------- */
 const VIEW = document.getElementById("view");
 const TITLE = document.getElementById("screen-title");
@@ -220,6 +346,8 @@ function renderToday() {
     : `<span class="pill warn">No check-in</span>`;
 
   const title = sess.name.replace(/^[A-C] · /, "");
+  const sw = sessionsThisWeek(), wt = S.profile.weeklyTarget || 4;
+  const weekPill = `<span class="pill ${sw >= wt ? "good" : "acc"}">Week ${sw}/${wt}</span>`;
   let html = `
     <div class="masthead">
       <div class="mast-top">
@@ -233,9 +361,24 @@ function renderToday() {
           <div class="mast-focus">${esc(sess.focus)}</div>
         </div>
       </div>
-      <div class="mast-meta">${readiness}</div>
+      <div class="mast-meta">${readiness}${weekPill}</div>
       <button class="btn good" id="start-log" style="margin-top:18px">Start &amp; log session →</button>
       ${ci ? "" : `<div class="tip">Check in first to adjust today's targets.</div>`}
+    </div>`;
+
+  // protein quick-logger
+  const pt = proteinToday(), ptgt = S.profile.proteinTarget || 0;
+  const ppct = ptgt ? Math.min(100, Math.round((pt / ptgt) * 100)) : 0;
+  html += `
+    <div class="blk-title"><span class="dot"></span>Protein today</div>
+    <div class="card">
+      <div class="row"><span class="bignum">${pt}<span class="unit"> / ${ptgt} g</span></span>
+        <span class="pill ${pt >= ptgt && ptgt ? "good" : "acc"}">${ppct}%</span></div>
+      <div class="pbar"><div class="pbar-fill" style="width:${ppct}%"></div></div>
+      <div class="qadd">
+        ${[20, 30, 40].map((g) => `<button class="qbtn" data-protein="${g}">+${g}</button>`).join("")}
+        <input id="p-set" inputmode="numeric" placeholder="set exact" />
+      </div>
     </div>`;
 
   for (const blk of sess.blocks) {
@@ -259,6 +402,9 @@ function renderToday() {
     const cur = SESSION_ORDER.indexOf(key);
     S.programIndex = (cur + 1) % SESSION_ORDER.length; S._m = Date.now(); save(); renderToday();
   };
+  document.querySelectorAll("[data-protein]").forEach((b) => b.onclick = () => { addProtein(+b.dataset.protein); renderToday(); });
+  const pset = document.getElementById("p-set");
+  if (pset) pset.onchange = (e) => { const v = e.target.value.trim(); if (v !== "") { setProtein(Number(v)); renderToday(); } };
 }
 
 /* ---------- LOGGING ---------- */
@@ -287,7 +433,8 @@ function openLog(key) {
   const sess = SESSIONS[key];
   TITLE.textContent = "Log · " + key;
   SUB.textContent = sess.name.replace(/^[A-C] · /, "");
-  let html = `<div class="card tight small muted">Reps · load · RPE (6–10). Pre-filled with last session.</div>`;
+  let html = `<div class="card tight small muted">Reps · load · RPE (6–10). Pre-filled with last session.</div>
+    <div class="restchips"><span class="label">Rest timer</span>${[60, 90, 120].map((s) => `<button class="qbtn" data-rest="${s}">${fmtClock(s)}</button>`).join("")}</div>`;
   for (const blk of sess.blocks) {
     html += `<div class="blk-title"><span class="dot"></span>${esc(blk.title)}</div>`;
     for (const exId of blk.ex) {
@@ -322,6 +469,7 @@ function openLog(key) {
   window.scrollTo(0, 0);
   document.getElementById("cancel-log").onclick = () => setTab("today");
   document.getElementById("save-log").onclick = () => saveLog(key);
+  document.querySelectorAll("[data-rest]").forEach((b) => b.onclick = () => startRest(+b.dataset.rest));
 }
 
 function saveLog(key) {
@@ -462,7 +610,19 @@ function renderProgress() {
   }
   const lifts = [["pullup_prog", "#16140F"], ["pushup_prog", "#8A2B22"], ["band_press", "#837B6A"]];
 
+  const wt = S.profile.weeklyTarget || 4, sw = sessionsThisWeek(), streak = targetStreakWeeks();
+  const weeks = weeklySessions(8).map((w) => ({ label: w.week.slice(5).replace("-", "/"), v: w.count, hi: w.count >= wt }));
+  const np = S.nutrition.filter((n) => n.protein != null).slice(-14).map((n) => ({ label: n.date.slice(5).replace("-", "/"), v: +n.protein, hi: (+n.protein) >= (S.profile.proteinTarget || 0) }));
+
   VIEW.innerHTML = `
+    <div class="blk-title"><span class="dot"></span>Adherence</div>
+    <div class="card">
+      <div class="row"><span class="bignum">${sw}<span class="unit"> / ${wt} this week</span></span>
+        <span class="pill ${streak > 0 ? "good" : "acc"}">${streak} wk streak</span></div>
+      ${barChart(weeks, "#8A2B22", wt)}
+    </div>
+    <div class="blk-title"><span class="dot"></span>Protein (g/day)</div>
+    <div class="card">${barChart(np, "#16140F", S.profile.proteinTarget)}</div>
     <div class="card">
       <div class="row"><div class="name">Bodyweight</div>
         ${lastM ? `<span class="pill ${(+lastM.weight) < S.profile.startWeight ? "good" : "acc"}">${esc(lastM.weight)} lb</span>` : ""}</div>
@@ -495,7 +655,22 @@ function renderProgress() {
       m.slice().reverse().slice(0, 8).map((x) => `<div class="row small" style="padding:6px 0;border-top:1px solid var(--line)">
         <span class="muted">${prettyDate(x.date)}</span>
         <span>${[x.weight && x.weight + "lb", x.waist && "w" + x.waist, x.chest && "c" + x.chest, x.arm && "a" + x.arm].filter(Boolean).join(" · ")}</span></div>`).join("")
-    }</div>` : ""}`;
+    }</div>` : ""}
+    <div class="blk-title"><span class="dot"></span>Progress photos</div>
+    <div class="card">
+      <div class="tiny muted">Stored only on this device — not synced. Same time of day &amp; light for useful comparisons.</div>
+      <label class="btn ghost" style="margin-top:12px;display:block;text-align:center">Add / replace today's photo
+        <input type="file" id="photo-in" accept="image/*" style="display:none"/></label>
+      <div id="photos"></div>
+    </div>`;
+
+  document.getElementById("photo-in").onchange = async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    toast("Saving photo…");
+    try { const img = await compressImage(file); await idbPut({ date: today(), img, _m: Date.now() }); toast("Photo saved"); renderPhotos(); }
+    catch (err) { toast("Photo failed"); }
+  };
+  renderPhotos();
 
   document.getElementById("save-m").onclick = () => {
     const g = (id) => { const v = document.getElementById(id).value.trim(); return v === "" ? null : Number(v); };
@@ -505,6 +680,27 @@ function renderProgress() {
     if (i >= 0) S.measurements[i] = Object.assign(S.measurements[i], rec); else S.measurements.push(rec);
     save(); toast("Measurements saved"); renderProgress();
   };
+}
+
+async function renderPhotos() {
+  const el = document.getElementById("photos"); if (!el) return;
+  let ps;
+  try { ps = await idbAll(); } catch (e) { el.innerHTML = `<div class="tiny muted">Photos unavailable on this browser.</div>`; return; }
+  if (!ps.length) { el.innerHTML = `<div class="chart-empty">No photos yet.</div>`; return; }
+  ps.sort((a, b) => (a.date < b.date ? -1 : 1));
+  const first = ps[0], last = ps[ps.length - 1];
+  let html = "";
+  if (ps.length >= 2) {
+    html += `<div class="cmp">
+      <figure><img src="${first.img}" alt=""/><figcaption>${prettyDate(first.date)}</figcaption></figure>
+      <figure><img src="${last.img}" alt=""/><figcaption>${prettyDate(last.date)}</figcaption></figure>
+    </div>`;
+  }
+  html += `<div class="pgrid">${ps.slice().reverse().map((p) => `<figure data-pdate="${p.date}"><img src="${p.img}" alt=""/><figcaption>${esc(p.date.slice(5))}</figcaption></figure>`).join("")}</div>`;
+  el.innerHTML = html;
+  el.querySelectorAll("[data-pdate]").forEach((f) => f.onclick = () => {
+    if (confirm("Delete photo from " + f.dataset.pdate + "?")) idbDel(f.dataset.pdate).then(renderPhotos);
+  });
 }
 
 /* ---------- MORE / export ---------- */
@@ -535,6 +731,13 @@ function buildExport() {
     });
     if (w.note) md += `  _note: ${w.note}_\n`;
   });
+  md += `\n## Adherence & nutrition\n`;
+  md += `- This week: ${sessionsThisWeek()}/${S.profile.weeklyTarget} sessions, ${targetStreakWeeks()} wk on-target streak\n`;
+  const recentN = S.nutrition.filter((n) => daysAgo(n.date) <= 8 && n.protein != null);
+  if (recentN.length) {
+    const avg = Math.round(recentN.reduce((s, n) => s + (+n.protein || 0), 0) / recentN.length);
+    md += `- Protein: avg ${avg} g/day over ${recentN.length} logged days (target ${S.profile.proteinTarget})\n`;
+  } else { md += `- Protein: not logged\n`; }
   md += `\n---\n_Paste this back to Claude for the weekly re-tune._\n`;
   return md;
 }
@@ -570,6 +773,8 @@ function renderMore() {
       <div class="grid2">
         <label class="fld"><span class="lt">Height (in)</span><input id="p-h" inputmode="decimal" value="${esc(S.profile.heightIn)}"/></label>
         <label class="fld"><span class="lt">Start weight (lb)</span><input id="p-w" inputmode="decimal" value="${esc(S.profile.startWeight)}"/></label>
+        <label class="fld"><span class="lt">Protein target (g)</span><input id="p-prot" inputmode="numeric" value="${esc(S.profile.proteinTarget)}"/></label>
+        <label class="fld"><span class="lt">Sessions / week</span><input id="p-wk" inputmode="numeric" value="${esc(S.profile.weeklyTarget)}"/></label>
       </div>
       <button class="btn" id="p-save" style="margin-top:12px">Save profile</button>
     </div>
@@ -604,6 +809,8 @@ function renderMore() {
   document.getElementById("p-save").onclick = () => {
     S.profile.heightIn = Number(document.getElementById("p-h").value) || S.profile.heightIn;
     S.profile.startWeight = Number(document.getElementById("p-w").value) || S.profile.startWeight;
+    S.profile.proteinTarget = Number(document.getElementById("p-prot").value) || S.profile.proteinTarget;
+    S.profile.weeklyTarget = Number(document.getElementById("p-wk").value) || S.profile.weeklyTarget;
     S._m = Date.now();
     save(); toast("Profile saved");
   };
