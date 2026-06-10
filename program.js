@@ -21,13 +21,13 @@ const EXERCISES = {
     q: "scapular wall slides exercise"
   },
   band_pull_apart: {
-    name: "Band Pull-Apart", cat: "prehab", load: "reps", target: { sets: 2, lo: 12, hi: 20 },
-    cue: "Arms straight at shoulder height. Pull the band apart by retracting the shoulder blades. No shrug.",
+    name: "Band Pull-Apart", cat: "pull", load: "band", target: { sets: 3, lo: 12, hi: 20 },
+    cue: "Working set for rear delts/mid-back — pick a band you feel by the last reps. Arms straight, retract the shoulder blades, no shrug.",
     q: "band pull apart exercise"
   },
   face_pull: {
-    name: "Band Face Pull", cat: "prehab", load: "reps", target: { sets: 2, lo: 12, hi: 20 },
-    cue: "Pull band to the face, elbows high, rotate hands back at the end. Light load.",
+    name: "Band Face Pull", cat: "pull", load: "band", target: { sets: 3, lo: 12, hi: 20 },
+    cue: "Working set, not a warmup — progress the band. Pull to the face, elbows high, rotate hands back at the end.",
     q: "band face pull exercise"
   },
   scap_pushup: {
@@ -82,6 +82,11 @@ const EXERCISES = {
     cue: "Hips high, lower the head toward the floor. Stop if the left shoulder is symptomatic.",
     q: "pike push up exercise"
   },
+  band_pressdown: {
+    name: "Band Triceps Pushdown", cat: "push", load: "band", target: { sets: 3, lo: 12, hi: 15 },
+    cue: "Anchor the band high. Pin the elbows to your sides, extend fully, control back up. Shoulder-friendly triceps work.",
+    q: "band triceps pushdown exercise"
+  },
 
   // ---- Legs ----
   goblet_squat: {
@@ -127,6 +132,12 @@ const EXERCISES = {
     cue: "Low back pressed down, arms and legs extended off the floor. Bend knees to regress.",
     q: "hollow hold exercise"
   },
+  hanging_knee: {
+    name: "Hanging Knee Raise", cat: "core", load: "reps", target: { sets: 3, lo: 8, hi: 12 },
+    ladder: ["Lying leg raise", "Hanging knee tuck", "Hanging knee raise", "Hanging leg raise"],
+    cue: "Hang from the bar. Raise the knees by curling the pelvis up — not just swinging the legs. Direct, loadable ab work.",
+    q: "hanging knee raise exercise"
+  },
 
   // ---- Conditioning ----
   row_steady: {
@@ -146,32 +157,32 @@ const EXERCISES = {
  */
 const SESSIONS = {
   A: {
-    name: "A · Pull & Core",
-    focus: "Upper back, posture, anti-extension core",
+    name: "A · Pull, Press & Core",
+    focus: "Back, rear delts, chest + triceps, core",
     blocks: [
-      { title: "Prehab", ex: ["wall_slides", "band_pull_apart", "face_pull", "scap_pushup"] },
-      { title: "Strength", ex: ["pullup_prog", "trx_row", "band_row"] },
-      { title: "Core", ex: ["dead_bug", "pallof"] },
+      { title: "Prehab", ex: ["wall_slides", "scap_pushup", "thoracic_open"] },
+      { title: "Strength", ex: ["pullup_prog", "trx_row", "band_pull_apart", "face_pull", "band_press", "band_pressdown"] },
+      { title: "Core", ex: ["dead_bug", "hanging_knee"] },
       { title: "Conditioning", ex: ["row_steady"] },
     ],
   },
   B: {
     name: "B · Push & Legs",
-    focus: "Chest (priority), legs, anti-extension core",
+    focus: "Chest (priority) + triceps, legs, core",
     blocks: [
-      { title: "Prehab", ex: ["wall_slides", "band_pull_apart", "face_pull", "prone_ytw"] },
-      { title: "Strength", ex: ["pushup_prog", "band_press", "goblet_squat", "split_squat"] },
-      { title: "Core", ex: ["plank"] },
+      { title: "Prehab", ex: ["wall_slides", "face_pull", "prone_ytw"] },
+      { title: "Strength", ex: ["pushup_prog", "band_press", "band_pressdown", "goblet_squat", "split_squat"] },
+      { title: "Core", ex: ["plank", "pallof"] },
       { title: "Conditioning", ex: ["row_steady"] },
     ],
   },
   C: {
     name: "C · Full Body & Engine",
-    focus: "Posterior chain, total-body, conditioning",
+    focus: "Posterior chain, chest + triceps, rear delts, engine",
     blocks: [
-      { title: "Prehab", ex: ["scap_pushup", "face_pull", "thoracic_open"] },
-      { title: "Strength", ex: ["rdl", "trx_row", "pushup_prog", "calf_raise"] },
-      { title: "Core", ex: ["hollow_hold"] },
+      { title: "Prehab", ex: ["scap_pushup", "prone_ytw", "thoracic_open"] },
+      { title: "Strength", ex: ["rdl", "trx_row", "face_pull", "band_press", "band_pressdown"] },
+      { title: "Core", ex: ["hollow_hold", "hanging_knee"] },
       { title: "Conditioning", ex: ["row_intervals"] },
     ],
   },

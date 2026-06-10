@@ -528,8 +528,19 @@ function renderCheckin() {
       <div class="seg" id="seg-energy">
         ${[1,2,3,4,5].map((n) => `<button data-v="${n}" class="${ci.energy === n ? "on" : ""}">${n}</button>`).join("")}
       </div>
-      <label class="fld"><span class="lt">Sleep last night (hours)</span>
+    </div>
+    <div class="card">
+      <div class="name">Sleep last night</div>
+      <label class="fld"><span class="lt">Hours</span>
         <input id="ci-sleep" inputmode="decimal" placeholder="e.g. 7" value="${esc(ci.sleep ?? "")}" /></label>
+      <div class="fld"><span class="lt">Quality (1 = poor, 5 = great)</span>
+        <div class="seg" id="seg-quality">
+          ${[1,2,3,4,5].map((n) => `<button data-q="${n}" class="${ci.sleepQuality === n ? "on" : ""}">${n}</button>`).join("")}
+        </div></div>
+      <div class="fld"><span class="lt">Last night — tap any that apply</span>
+        <div class="flags" id="ci-flags">
+          ${[["alcohol", "Alcohol"], ["caffeine", "Caffeine pm"], ["screens", "Screens in bed"]].map(([k, l]) => `<button data-flag="${k}" class="flagbtn ${ci.flags && ci.flags[k] ? "on" : ""}">${l}</button>`).join("")}
+        </div></div>
     </div>
     <div class="card">
       <div class="name">Pain check</div>
@@ -541,12 +552,22 @@ function renderCheckin() {
     <button class="btn good" id="save-ci" style="margin-top:14px">Save check-in</button>`;
 
   let energy = ci.energy || 0;
+  let sleepQuality = ci.sleepQuality || 0;
+  const flags = Object.assign({ alcohol: false, caffeine: false, screens: false }, ci.flags || {});
   const pains = {};
   (ci.pains || []).forEach((p) => (pains[p.area] = p.sev));
 
   document.querySelectorAll("#seg-energy button").forEach((b) => b.onclick = () => {
     energy = +b.dataset.v;
     document.querySelectorAll("#seg-energy button").forEach((x) => x.classList.toggle("on", x === b));
+  });
+  document.querySelectorAll("#seg-quality button").forEach((b) => b.onclick = () => {
+    sleepQuality = +b.dataset.q;
+    document.querySelectorAll("#seg-quality button").forEach((x) => x.classList.toggle("on", x === b));
+  });
+  document.querySelectorAll("#ci-flags .flagbtn").forEach((b) => b.onclick = () => {
+    flags[b.dataset.flag] = !flags[b.dataset.flag];
+    b.classList.toggle("on", flags[b.dataset.flag]);
   });
   document.querySelectorAll(".seg.pain").forEach((seg) => {
     seg.querySelectorAll("button").forEach((b) => b.onclick = () => {
@@ -556,8 +577,9 @@ function renderCheckin() {
   });
   document.getElementById("save-ci").onclick = () => {
     const rec = {
-      date: today(), energy,
+      date: today(), energy, sleepQuality,
       sleep: document.getElementById("ci-sleep").value.trim() === "" ? null : Number(document.getElementById("ci-sleep").value),
+      flags: { ...flags },
       pains: Object.entries(pains).map(([area, sev]) => ({ area, sev })).filter((p) => p.sev > 0),
       note: document.getElementById("ci-note").value.trim(),
       _m: Date.now(),
@@ -718,7 +740,8 @@ function buildExport() {
   if (!recentC.length) md += `_none logged_\n`;
   recentC.forEach((c) => {
     const pains = (c.pains || []).filter((p) => p.sev > 0).map((p) => `${p.area}=${["none","mild","mod","sharp"][p.sev]}`).join(", ");
-    md += `- ${c.date}: energy ${c.energy}/5, sleep ${c.sleep ?? "?"}h${pains ? `, PAIN: ${pains}` : ""}${c.note ? ` — ${c.note}` : ""}\n`;
+    const fl = c.flags ? Object.entries(c.flags).filter(([, v]) => v).map(([k]) => k).join("/") : "";
+    md += `- ${c.date}: energy ${c.energy}/5, sleep ${c.sleep ?? "?"}h${c.sleepQuality ? ` q${c.sleepQuality}/5` : ""}${fl ? ` [${fl}]` : ""}${pains ? `, PAIN: ${pains}` : ""}${c.note ? ` — ${c.note}` : ""}\n`;
   });
   md += `\n## Workouts (last week)\n`;
   if (!recentW.length) md += `_none logged_\n`;
@@ -738,6 +761,17 @@ function buildExport() {
     const avg = Math.round(recentN.reduce((s, n) => s + (+n.protein || 0), 0) / recentN.length);
     md += `- Protein: avg ${avg} g/day over ${recentN.length} logged days (target ${S.profile.proteinTarget})\n`;
   } else { md += `- Protein: not logged\n`; }
+  const sc = S.checkins.filter((c) => c.sleep != null);
+  if (sc.length) {
+    const avgH = (sc.reduce((s, c) => s + (+c.sleep), 0) / sc.length).toFixed(1);
+    const q = S.checkins.filter((c) => c.sleepQuality);
+    const avgQ = q.length ? (q.reduce((s, c) => s + c.sleepQuality, 0) / q.length).toFixed(1) : "–";
+    md += `- Sleep: avg ${avgH}h, quality ${avgQ}/5 over ${sc.length} nights\n`;
+    const withE = S.checkins.filter((c) => c.energy && c.flags);
+    const avg = (arr) => arr.length ? (arr.reduce((s, c) => s + c.energy, 0) / arr.length).toFixed(1) : null;
+    const al = withE.filter((c) => c.flags.alcohol), no = withE.filter((c) => !c.flags.alcohol);
+    if (al.length && no.length) md += `- Energy: ${avg(no)}/5 alcohol-free vs ${avg(al)}/5 after alcohol (n=${no.length}/${al.length})\n`;
+  }
   md += `\n---\n_Paste this back to Claude for the weekly re-tune._\n`;
   return md;
 }

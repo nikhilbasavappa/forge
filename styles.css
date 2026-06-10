@@ -151,11 +151,17 @@ input, select, textarea {
 }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--ox); }
 input::placeholder { color: var(--mut); opacity: 0.7; }
-label.fld { display: block; margin: 16px 0 0; }
-label.fld .lt {
+.fld { display: block; margin: 16px 0 0; }
+.fld .lt {
   display: block; font-family: var(--m); font-size: 0.68rem; text-transform: uppercase;
   letter-spacing: 0.12em; color: var(--mut); margin-bottom: 7px;
 }
+.flags { display: flex; gap: 8px; flex-wrap: wrap; }
+.flagbtn {
+  font-family: var(--m); font-size: 0.74rem; border: 1px solid var(--line-2); background: var(--paper);
+  color: var(--mut); border-radius: 0; padding: 10px 12px; cursor: pointer;
+}
+.flagbtn.on { background: var(--ox); border-color: var(--ox); color: var(--paper); font-weight: 700; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 /* segmented controls */
