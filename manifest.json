@@ -1,0 +1,14 @@
+{
+  "name": "Forge — Strength & Posture",
+  "short_name": "Forge",
+  "description": "Home strength, posture, and recomposition tracker.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F4F1EA",
+  "theme_color": "#F4F1EA",
+  "icons": [
+    { "src": "icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any maskable" }
+  ]
+}

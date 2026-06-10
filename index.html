@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="theme-color" content="#F4F1EA" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Forge" />
+  <title>Forge</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="icon" href="icon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <div class="title" id="screen-title">Today</div>
+      <div class="sub" id="screen-sub"></div>
+    </header>
+
+    <main id="view"><!-- screens render here --></main>
+
+    <nav id="tabbar">
+      <button class="tab" data-tab="today">Today</button>
+      <button class="tab" data-tab="checkin">Check-in</button>
+      <button class="tab" data-tab="progress">Progress</button>
+      <button class="tab" data-tab="more">More</button>
+    </nav>
+  </div>
+
+  <script src="program.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
