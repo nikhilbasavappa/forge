@@ -87,6 +87,16 @@ const EXERCISES = {
     cue: "Anchor the band high. Pin the elbows to your sides, extend fully, control back up. Shoulder-friendly triceps work.",
     q: "band triceps pushdown exercise"
   },
+  band_fly: {
+    name: "Band Chest Fly", cat: "push", load: "band", target: { sets: 3, lo: 12, hi: 15 },
+    cue: "Anchor behind you, slight fixed elbow bend. Arc the hands together in front and squeeze the chest; control the stretch. Isolates the pecs without loading the triceps.",
+    q: "resistance band chest fly"
+  },
+  band_curl: {
+    name: "Band / Suspension Biceps Curl", cat: "pull", load: "band", target: { sets: 3, lo: 10, hi: 15 },
+    cue: "Elbows pinned, curl with control, squeeze at the top, slow on the descent. Keep it light — this is for fullness, not max load.",
+    q: "resistance band biceps curl"
+  },
 
   // ---- Legs ----
   goblet_squat: {
@@ -157,11 +167,11 @@ const EXERCISES = {
  */
 const SESSIONS = {
   A: {
-    name: "A · Pull, Press & Core",
-    focus: "Back, rear delts, chest + triceps, core",
+    name: "A · Pull, Chest & Core",
+    focus: "Back, rear delts, chest, biceps, core",
     blocks: [
       { title: "Prehab", ex: ["wall_slides", "scap_pushup", "thoracic_open"] },
-      { title: "Strength", ex: ["pullup_prog", "trx_row", "band_pull_apart", "face_pull", "band_press", "band_pressdown"] },
+      { title: "Strength", ex: ["pullup_prog", "trx_row", "band_pull_apart", "face_pull", "band_press", "band_curl"] },
       { title: "Core", ex: ["dead_bug", "hanging_knee"] },
       { title: "Conditioning", ex: ["row_steady"] },
     ],
@@ -171,17 +181,17 @@ const SESSIONS = {
     focus: "Chest (priority) + triceps, legs, core",
     blocks: [
       { title: "Prehab", ex: ["wall_slides", "face_pull", "prone_ytw"] },
-      { title: "Strength", ex: ["pushup_prog", "band_press", "band_pressdown", "goblet_squat", "split_squat"] },
+      { title: "Strength", ex: ["pushup_prog", "band_fly", "band_pressdown", "goblet_squat", "split_squat"] },
       { title: "Core", ex: ["plank", "pallof"] },
       { title: "Conditioning", ex: ["row_steady"] },
     ],
   },
   C: {
     name: "C · Full Body & Engine",
-    focus: "Posterior chain, chest + triceps, rear delts, engine",
+    focus: "Posterior chain, chest, rear delts, biceps, engine",
     blocks: [
       { title: "Prehab", ex: ["scap_pushup", "prone_ytw", "thoracic_open"] },
-      { title: "Strength", ex: ["rdl", "trx_row", "face_pull", "band_press", "band_pressdown"] },
+      { title: "Strength", ex: ["rdl", "trx_row", "face_pull", "band_press", "band_curl"] },
       { title: "Core", ex: ["hollow_hold", "hanging_knee"] },
       { title: "Conditioning", ex: ["row_intervals"] },
     ],
