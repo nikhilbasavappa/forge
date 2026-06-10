@@ -21,7 +21,85 @@ function load() {
     return Object.assign(structuredClone(DEFAULT_STATE), parsed);
   } catch (e) { return structuredClone(DEFAULT_STATE); }
 }
-function save() { localStorage.setItem(KEY, JSON.stringify(S)); }
+function save() { localStorage.setItem(KEY, JSON.stringify(S)); scheduleSync(); }
+
+/* ---------- cross-device sync (Cloudflare Worker, passphrase-gated) ---------- */
+const SYNC_ENDPOINT = "https://forge-sync.nikvbas.workers.dev/state";
+const SYNC_KEY = "forge.sync";
+let SY = (() => { try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || {}; } catch { return {}; } })();
+function saveSync() { localStorage.setItem(SYNC_KEY, JSON.stringify(SY)); }
+function syncEndpoint() { return SY.url || SYNC_ENDPOINT; }
+let syncState = "off"; // off | syncing | ok | err | offline
+let syncMsg = "";
+
+function setSyncStatus(s, msg) {
+  syncState = s; syncMsg = msg || "";
+  const el = document.getElementById("sync-status");
+  if (el) el.textContent = syncStatusText();
+}
+function syncStatusText() {
+  if (!SY.key) return "Not connected. Enter a passphrase to sync across devices.";
+  const last = SY.lastSync ? `last synced ${daysAgo(toDate(SY.lastSync))}d ago` : "not synced yet";
+  return ({
+    off: `Connected · ${last}`,
+    syncing: "Syncing…",
+    ok: `Synced just now`,
+    offline: `Offline · ${last}`,
+    err: `Sync error: ${syncMsg} · ${last}`,
+  })[syncState] || `Connected · ${last}`;
+}
+function toDate(ms) { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+
+async function pullRemote() {
+  const r = await fetch(syncEndpoint(), { headers: { Authorization: "Bearer " + SY.key } });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return (await r.json()).state;
+}
+async function pushRemote(state) {
+  const r = await fetch(syncEndpoint(), {
+    method: "PUT",
+    headers: { Authorization: "Bearer " + SY.key, "Content-Type": "application/json" },
+    body: JSON.stringify({ state }),
+  });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+
+function mergeByKey(a = [], b = [], key) {
+  const m = {};
+  [...a, ...b].forEach((r) => { const k = r[key]; const ex = m[k]; if (!ex || (r._m || 0) >= (ex._m || 0)) m[k] = r; });
+  return Object.values(m).sort((x, y) => (x[key] < y[key] ? -1 : 1));
+}
+function mergeStates(a, b) {
+  if (!b) return a; if (!a) return b;
+  const out = structuredClone(a);
+  const w = {};
+  [...(a.workouts || []), ...(b.workouts || [])].forEach((x) => { const e = w[x.id]; if (!e || (x._m || 0) >= (e._m || 0)) w[x.id] = x; });
+  out.workouts = Object.values(w).sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : x.id - y.id));
+  out.checkins = mergeByKey(a.checkins, b.checkins, "date");
+  out.measurements = mergeByKey(a.measurements, b.measurements, "date");
+  if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.programIndex = b.programIndex; out._m = b._m; }
+  return out;
+}
+
+let syncing = false, syncT;
+function scheduleSync() { if (!SY.key) return; clearTimeout(syncT); syncT = setTimeout(() => syncNow(), 1800); }
+async function syncNow(opts = {}) {
+  if (!SY.key || syncing) return;
+  if (!navigator.onLine) { setSyncStatus("offline"); return; }
+  syncing = true; setSyncStatus("syncing");
+  try {
+    const remote = await pullRemote();
+    const merged = mergeStates(S, remote);
+    S = merged; localStorage.setItem(KEY, JSON.stringify(S));
+    await pushRemote(S);
+    SY.lastSync = Date.now(); saveSync();
+    setSyncStatus("ok");
+    if (opts.rerender) setTab(current);
+  } catch (e) {
+    setSyncStatus("err", e.message);
+  } finally { syncing = false; }
+}
 
 /* ---------- date / util ---------- */
 const pad = (n) => String(n).padStart(2, "0");
@@ -179,7 +257,7 @@ function renderToday() {
   document.getElementById("start-log").onclick = () => openLog(key);
   document.getElementById("switch-sess").onclick = () => {
     const cur = SESSION_ORDER.indexOf(key);
-    S.programIndex = (cur + 1) % SESSION_ORDER.length; save(); renderToday();
+    S.programIndex = (cur + 1) % SESSION_ORDER.length; S._m = Date.now(); save(); renderToday();
   };
 }
 
@@ -270,8 +348,9 @@ function saveLog(key) {
   if (!entries.length) { toast("Log at least one set"); return; }
 
   const note = (document.getElementById("log-note").value || "").trim();
-  S.workouts.push({ id: Date.now(), date: today(), sessionKey: key, entries, note });
+  S.workouts.push({ id: Date.now(), date: today(), sessionKey: key, entries, note, _m: Date.now() });
   S.programIndex = (SESSION_ORDER.indexOf(key) + 1) % SESSION_ORDER.length;
+  S._m = Date.now();
   save();
   toast("Workout saved");
   setTab("today");
@@ -333,6 +412,7 @@ function renderCheckin() {
       sleep: document.getElementById("ci-sleep").value.trim() === "" ? null : Number(document.getElementById("ci-sleep").value),
       pains: Object.entries(pains).map(([area, sev]) => ({ area, sev })).filter((p) => p.sev > 0),
       note: document.getElementById("ci-note").value.trim(),
+      _m: Date.now(),
     };
     const i = S.checkins.findIndex((c) => c.date === today());
     if (i >= 0) S.checkins[i] = rec; else S.checkins.push(rec);
@@ -419,7 +499,7 @@ function renderProgress() {
 
   document.getElementById("save-m").onclick = () => {
     const g = (id) => { const v = document.getElementById(id).value.trim(); return v === "" ? null : Number(v); };
-    const rec = { date: today(), weight: g("m-weight"), waist: g("m-waist"), chest: g("m-chest"), arm: g("m-arm") };
+    const rec = { date: today(), weight: g("m-weight"), waist: g("m-waist"), chest: g("m-chest"), arm: g("m-arm"), _m: Date.now() };
     if (rec.weight == null && rec.waist == null && rec.chest == null && rec.arm == null) { toast("Enter at least one"); return; }
     const i = S.measurements.findIndex((x) => x.date === today());
     if (i >= 0) S.measurements[i] = Object.assign(S.measurements[i], rec); else S.measurements.push(rec);
@@ -461,8 +541,17 @@ function buildExport() {
 
 function renderMore() {
   TITLE.textContent = "More";
-  SUB.textContent = "Export · backup · settings";
+  SUB.textContent = "Sync · export · backup";
   VIEW.innerHTML = `
+    <div class="blk-title"><span class="dot"></span>Sync across devices</div>
+    <div class="card">
+      <div class="small muted" id="sync-status">${esc(syncStatusText())}</div>
+      <label class="fld"><span class="lt">Passphrase (same on every device)</span>
+        <input id="sync-key" type="password" placeholder="8+ characters" value="${esc(SY.key || "")}"/></label>
+      <button class="btn" id="sync-connect" style="margin-top:12px">${SY.key ? "Sync now" : "Connect & sync"}</button>
+      ${SY.key ? `<button class="btn ghost" id="sync-off" style="margin-top:8px">Disconnect this device</button>` : ""}
+      <div class="tiny muted" style="margin-top:10px">Use the same passphrase on each device to share data. Anyone with it can read your log, so make it long. Data syncs on open, on change, and when you return to the app.</div>
+    </div>
     <div class="blk-title"><span class="dot"></span>Weekly review export</div>
     <div class="card">
       <div class="small muted">Copies a summary of the week to paste back for re-tuning.</div>
@@ -515,7 +604,20 @@ function renderMore() {
   document.getElementById("p-save").onclick = () => {
     S.profile.heightIn = Number(document.getElementById("p-h").value) || S.profile.heightIn;
     S.profile.startWeight = Number(document.getElementById("p-w").value) || S.profile.startWeight;
+    S._m = Date.now();
     save(); toast("Profile saved");
+  };
+  document.getElementById("sync-connect").onclick = async () => {
+    const k = document.getElementById("sync-key").value.trim();
+    if (k.length < 8) { toast("Passphrase: 8+ characters"); return; }
+    SY.key = k; SY.url = SY.url || SYNC_ENDPOINT; saveSync();
+    await syncNow();
+    toast(syncState === "ok" ? "Synced" : "Sync: " + syncMsg);
+    renderMore();
+  };
+  const offBtn = document.getElementById("sync-off");
+  if (offBtn) offBtn.onclick = () => {
+    SY = { url: SY.url }; saveSync(); setSyncStatus("off"); toast("Disconnected"); renderMore();
   };
   document.getElementById("reset").onclick = () => {
     if (confirm("Erase ALL workouts, check-ins, and measurements? This cannot be undone.")) {
@@ -526,6 +628,9 @@ function renderMore() {
 
 /* ---------- boot ---------- */
 setTab("today");
+if (SY.key) syncNow({ rerender: true });
+window.addEventListener("online", () => syncNow({ rerender: true }));
+document.addEventListener("visibilitychange", () => { if (!document.hidden) syncNow({ rerender: true }); });
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 }

@@ -1,0 +1,9 @@
+name = "forge-sync"
+main = "src/worker.js"
+compatibility_date = "2024-11-01"
+workers_dev = true
+
+# KV namespace id is filled in after `wrangler kv namespace create FORGE_KV`.
+[[kv_namespaces]]
+binding = "FORGE_KV"
+id = "b05c4a655ef141f197e5292042073834"

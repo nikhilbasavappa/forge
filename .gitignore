@@ -1,2 +1,5 @@
 .DS_Store
 .claude/
+sync/node_modules/
+sync/.wrangler/
+node_modules/
