@@ -93,9 +93,14 @@ const EXERCISES = {
     q: "resistance band chest fly"
   },
   band_curl: {
-    name: "Band / Suspension Biceps Curl", cat: "pull", load: "band", target: { sets: 3, lo: 10, hi: 15 },
-    cue: "Elbows pinned, curl with control, squeeze at the top, slow on the descent. Keep it light — this is for fullness, not max load.",
-    q: "resistance band biceps curl"
+    name: "Biceps Curl (supinated)", cat: "pull", load: "band", target: { sets: 3, lo: 8, hi: 15 },
+    cue: "Elbows pinned, full range, squeeze hard at the top, slow descent. 8–15 reps near failure, add load over time. Builds the peak / long head. Use dumbbells once you have them — bands run out of tension here.",
+    q: "dumbbell biceps curl exercise"
+  },
+  hammer_curl: {
+    name: "Hammer Curl (neutral grip)", cat: "pull", load: "band", target: { sets: 3, lo: 8, hi: 15 },
+    cue: "Palms neutral (thumbs up), curl with control. Trains the brachialis under the biceps — adds thickness and pushes the peak up. Load it: dumbbells beat bands here.",
+    q: "hammer curl exercise"
   },
 
   // ---- Legs ----
@@ -167,11 +172,11 @@ const EXERCISES = {
  */
 const SESSIONS = {
   A: {
-    name: "A · Pull, Chest & Core",
-    focus: "Back, rear delts, chest, biceps, core",
+    name: "A · Pull, Chest & Arms",
+    focus: "Back, rear delts, chest, biceps (peak + thickness), core",
     blocks: [
       { title: "Prehab", ex: ["wall_slides", "scap_pushup", "thoracic_open"] },
-      { title: "Strength", ex: ["pullup_prog", "trx_row", "band_pull_apart", "face_pull", "band_press", "band_curl"] },
+      { title: "Strength", ex: ["pullup_prog", "trx_row", "face_pull", "band_press", "band_curl", "hammer_curl"] },
       { title: "Core", ex: ["dead_bug", "hanging_knee"] },
       { title: "Conditioning", ex: ["row_steady"] },
     ],
@@ -191,7 +196,7 @@ const SESSIONS = {
     focus: "Posterior chain, chest, rear delts, biceps, engine",
     blocks: [
       { title: "Prehab", ex: ["scap_pushup", "prone_ytw", "thoracic_open"] },
-      { title: "Strength", ex: ["rdl", "trx_row", "face_pull", "band_press", "band_curl"] },
+      { title: "Strength", ex: ["rdl", "trx_row", "face_pull", "band_press", "hammer_curl"] },
       { title: "Core", ex: ["hollow_hold", "hanging_knee"] },
       { title: "Conditioning", ex: ["row_intervals"] },
     ],
