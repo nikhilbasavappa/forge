@@ -277,7 +277,7 @@ const SESSIONS = {
 
 const SESSION_ORDER = ["A", "B", "C"];
 
-const PAIN_AREAS = ["Winged scapula / R shoulder blade", "L shoulder (old dislocation)", "Neck / upper back", "Lower back", "Other"];
+const PAIN_AREAS = ["Winged scapula / L shoulder blade", "L shoulder (old dislocation)", "Neck / upper back", "Lower back", "Other"];
 
 /* Swap alternatives — same muscle, different angle/equipment/load.
  * Used by the one-tap swap (e.g., a movement aggravates the shoulder). */
