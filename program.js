@@ -216,11 +216,11 @@ const EXERCISES = {
  */
 const SESSIONS = {
   A: {
-    name: "A · Back, Rear Delts & Arms",
-    focus: "Mid-back density, lats, rear delts, biceps, core",
+    name: "A · Back & Arms",
+    focus: "Mid-back, lats, rear delts, biceps + triceps, core",
     blocks: [
       { title: "Prehab", ex: ["wall_slides", "scap_pushup", "thoracic_open"] },
-      { title: "Strength", ex: ["pullup_prog", "trx_row", "face_pull", "band_curl", "hammer_curl"] },
+      { title: "Strength", ex: ["pullup_prog", "trx_row", "face_pull", "band_curl", "hammer_curl", "band_pressdown"] },
       { title: "Core", ex: ["dead_bug", "hanging_knee"] },
       { title: "Conditioning", ex: ["row_steady"] },
     ],
@@ -230,17 +230,17 @@ const SESSIONS = {
     focus: "Chest (upper bias), side delts, triceps, legs, core",
     blocks: [
       { title: "Prehab", ex: ["wall_slides", "face_pull", "prone_ytw"] },
-      { title: "Strength", ex: ["pushup_prog", "band_press", "lateral_raise", "band_pressdown", "goblet_squat"] },
+      { title: "Strength", ex: ["pushup_prog", "band_press", "lateral_raise", "diamond_pushup", "goblet_squat"] },
       { title: "Core", ex: ["plank", "pallof"] },
       { title: "Conditioning", ex: ["row_steady"] },
     ],
   },
   C: {
-    name: "C · Full Body & Engine",
-    focus: "Mid-back, chest (upper), rear delts, hamstrings, engine",
+    name: "C · Full Body & Arms",
+    focus: "Mid-back, upper chest, side delts, hamstrings, biceps, engine",
     blocks: [
       { title: "Prehab", ex: ["scap_pushup", "prone_ytw", "thoracic_open"] },
-      { title: "Strength", ex: ["band_row", "band_fly", "face_pull", "rdl", "hammer_curl"] },
+      { title: "Strength", ex: ["band_row", "band_fly", "lateral_raise", "rdl", "band_curl", "hammer_curl"] },
       { title: "Core", ex: ["hollow_hold", "hanging_knee"] },
       { title: "Conditioning", ex: ["row_intervals"] },
     ],
