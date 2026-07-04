@@ -209,6 +209,34 @@ const EXERCISES = {
     cue: "On all fours, extend opposite arm + leg without letting the hips rotate. Slow and braced. Anti-rotation core, no band needed.",
     q: "bird dog exercise"
   },
+
+  // ---- Mobility / decompression (off-day + cooldown) ----
+  dead_hang: {
+    name: "Dead Hang", cat: "mobility", load: "time", target: { sets: 3, sec: 30 },
+    ladder: ["Active scapular hang (shoulders engaged)", "Passive dead hang", "Single-arm assisted", "Weighted hang"],
+    cue: "Hang from the bar. START ACTIVE — pull the shoulders gently DOWN out of the shrug and stay engaged — before any fully passive hanging. Decompresses the shoulder and builds grip. Build time slowly; stop if the shoulder feels unstable.",
+    q: "dead hang shoulder decompression active scapular"
+  },
+  doorway_pec: {
+    name: "Doorway Pec Stretch", cat: "mobility", load: "time", target: { sets: 2, sec: 30 }, side: true,
+    cue: "Forearm on the door frame, elbow near shoulder height, step through and turn away. Opens the chest and front shoulder — the anti-hunch stretch.",
+    q: "doorway pec stretch"
+  },
+  hip_flexor: {
+    name: "Half-Kneeling Hip Flexor Stretch", cat: "mobility", load: "time", target: { sets: 2, sec: 30 }, side: true,
+    cue: "Half-kneeling. Tuck the pelvis under and squeeze the back glute, THEN lean forward. Stretches the desk-tight hip flexor. Don't arch the low back.",
+    q: "half kneeling hip flexor stretch"
+  },
+  deep_squat_hold: {
+    name: "Deep Squat Hold", cat: "mobility", load: "time", target: { sets: 2, sec: 30 },
+    cue: "Sink into the deepest squat you can, heels down, elbows gently pushing the knees out. Hip and ankle mobility for cleaner squats.",
+    q: "deep squat hold mobility"
+  },
+  cat_cow: {
+    name: "Cat-Cow", cat: "mobility", load: "reps", target: { sets: 1, lo: 8, hi: 10 },
+    cue: "On all fours, slowly alternate arching (cow) and rounding (cat) the spine with your breath. Gentle spinal mobility.",
+    q: "cat cow spinal mobility"
+  },
 };
 
 /* Sessions — a rotating A/B/C deck. Do "the next one" whenever you train,

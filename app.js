@@ -287,6 +287,7 @@ function daysSinceLastWorkout() {
 }
 
 const PREHAB_ROUTINE = ["wall_slides", "scap_pushup", "band_pull_apart", "face_pull", "prone_ytw", "thoracic_open"];
+const MOBILITY_ROUTINE = ["dead_hang", "thoracic_open", "doorway_pec", "hip_flexor", "deep_squat_hold", "cat_cow"];
 
 /* ---------- rest timer ---------- */
 let restInt = null, restEnd = 0;
@@ -478,9 +479,11 @@ function renderToday() {
     html += `</div>`;
   }
   html += `<button class="btn ghost" id="start-prehab" style="margin-top:20px">Daily prehab — off-day routine</button>`;
+  html += `<button class="btn ghost" id="start-mobility" style="margin-top:8px">Mobility &amp; stretch — cooldown / off-day</button>`;
   VIEW.innerHTML = html;
   document.getElementById("start-log").onclick = () => startRun(key);
   document.getElementById("start-prehab").onclick = () => startPrehab();
+  document.getElementById("start-mobility").onclick = () => startMobility();
   const dOn = document.getElementById("deload-on"); if (dOn) dOn.onclick = () => { S.deloadWeek = weekStartStr(new Date()); S._m = Date.now(); save(); toast("Deload week on"); renderToday(); };
   const dOff = document.getElementById("deload-off"); if (dOff) dOff.onclick = () => { S.deloadWeek = null; S._m = Date.now(); save(); renderToday(); };
   document.querySelectorAll("[data-exhist]").forEach((el) => el.onclick = () => renderExercise(el.dataset.exhist));
@@ -501,7 +504,11 @@ function startRun(key) {
   renderRunner();
 }
 function startPrehab() {
-  RUN = { key: "Prehab", list: PREHAB_ROUTINE.slice(), idx: 0, startTs: Date.now(), data: {}, isPrehab: true };
+  RUN = { key: "Prehab", list: PREHAB_ROUTINE.slice(), idx: 0, startTs: Date.now(), data: {}, isPrehab: true, title: "Daily prehab" };
+  renderRunner();
+}
+function startMobility() {
+  RUN = { key: "Mobility", list: MOBILITY_ROUTINE.slice(), idx: 0, startTs: Date.now(), data: {}, isPrehab: true, title: "Mobility & stretch" };
   renderRunner();
 }
 function prescribeLvl(p) { return /add load/i.test(p.note) ? "good" : /low energy|deload/i.test(p.note) ? "warn" : "acc"; }
@@ -523,7 +530,7 @@ function renderRunner() {
   const pres = prescribe(exId);
   const existing = RUN.data[exId];
   const elapsed = Math.round((Date.now() - RUN.startTs) / 60000);
-  TITLE.textContent = RUN.isPrehab ? "Daily prehab" : `Session ${RUN.key}`;
+  TITLE.textContent = RUN.isPrehab ? RUN.title : `Session ${RUN.key}`;
   SUB.textContent = `Exercise ${RUN.idx + 1} / ${total} · ${elapsed} min`;
 
   let rows = "";
@@ -635,7 +642,7 @@ function renderExercise(exId) {
 }
 
 function finishRun() {
-  if (RUN.isPrehab) { stopRest(); RUN = null; toast("Prehab done"); setTab("today"); return; }
+  if (RUN.isPrehab) { const t = RUN.title || "Prehab"; stopRest(); RUN = null; toast(t + " done"); setTab("today"); return; }
   const entries = Object.entries(RUN.data).map(([exId, sets]) => {
     const variation = sets.variation;
     const clean = sets.filter((s) => s && (s.reps != null || s.load != null));
