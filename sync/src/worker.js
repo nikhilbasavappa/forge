@@ -15,7 +15,7 @@ function corsHeaders(origin) {
   return {
     "Access-Control-Allow-Origin": allow,
     "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Group",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
   };
@@ -36,6 +36,29 @@ export default {
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: h });
 
     const url = new URL(req.url);
+
+    // Buddy accountability group: a shared group code, one summary per member name.
+    if (url.pathname === "/group") {
+      const group = (req.headers.get("X-Group") || url.searchParams.get("group") || "").trim();
+      if (group.length < 6) return json({ error: "group code must be 6+ characters" }, 401, h);
+      const gkey = "group:" + group;
+      if (req.method === "GET") {
+        const v = await env.FORGE_KV.get(gkey);
+        return json({ members: v ? JSON.parse(v) : {} }, 200, h);
+      }
+      if (req.method === "PUT") {
+        let body;
+        try { body = await req.json(); } catch { return json({ error: "bad json" }, 400, h); }
+        const name = String(body.name || "anon").slice(0, 40);
+        const cur = await env.FORGE_KV.get(gkey);
+        const members = cur ? JSON.parse(cur) : {};
+        members[name] = { summary: body.summary || {}, at: Date.now() };
+        await env.FORGE_KV.put(gkey, JSON.stringify(members));
+        return json({ ok: true }, 200, h);
+      }
+      return json({ error: "method not allowed" }, 405, h);
+    }
+
     if (url.pathname !== "/state") {
       return new Response("Forge sync OK", { status: 200, headers: h });
     }

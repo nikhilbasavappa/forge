@@ -43,14 +43,14 @@ html, body {
 /* ---- tab bar ---- */
 #tabbar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(5, 1fr);
   background: var(--paper); border-top: 1px solid var(--ink);
   padding-bottom: env(safe-area-inset-bottom);
 }
 .tab {
   background: none; border: none; border-top: 2px solid transparent; margin-top: -1px;
   color: var(--mut); padding: 14px 0 13px; cursor: pointer;
-  font-family: var(--m); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.16em;
+  font-family: var(--m); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em;
 }
 .tab + .tab { border-left: 1px solid var(--line); }
 .tab.active { color: var(--ink); border-top-color: var(--ox); }

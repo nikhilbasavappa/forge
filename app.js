@@ -106,12 +106,113 @@ async function syncNow(opts = {}) {
     const merged = mergeStates(S, remote);
     S = merged; localStorage.setItem(KEY, JSON.stringify(S));
     await pushRemote(S);
+    publishSummary();
     SY.lastSync = Date.now(); saveSync();
     setSyncStatus("ok");
     if (opts.rerender) setTab(current);
   } catch (e) {
     setSyncStatus("err", e.message);
   } finally { syncing = false; }
+}
+
+/* ---------- buddy accountability ---------- */
+function groupEndpoint() { return (SY.url || SYNC_ENDPOINT).replace(/\/state$/, "/group"); }
+function buildSummary() {
+  const m = S.measurements.filter((x) => x.weight != null);
+  const lastW = m.length ? +m[m.length - 1].weight : null;
+  const firstW = m.length ? +m[0].weight : null;
+  const rn = S.nutrition.filter((n) => daysAgo(n.date) <= 8 && n.protein != null);
+  const rw = S.walks.filter((w) => daysAgo(w.date) <= 8 && w.min != null);
+  return {
+    weekSessions: sessionsThisWeek(),
+    weekTarget: S.profile.weeklyTarget || 4,
+    streak: targetStreakWeeks(),
+    totalWorkouts: S.workouts.length,
+    lastSession: S.workouts.length ? S.workouts[S.workouts.length - 1].date : null,
+    proteinAvg: rn.length ? Math.round(rn.reduce((s, n) => s + (+n.protein || 0), 0) / rn.length) : null,
+    proteinTarget: S.profile.proteinTarget || null,
+    walkAvg: rw.length ? Math.round(rw.reduce((s, w) => s + (+w.min || 0), 0) / rw.length) : null,
+    weight: lastW,
+    weightDelta: m.length > 1 ? +(lastW - firstW).toFixed(1) : null,
+  };
+}
+async function publishSummary() {
+  if (!SY.group || !SY.name) return;
+  try {
+    await fetch(groupEndpoint(), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-Group": SY.group },
+      body: JSON.stringify({ name: SY.name, summary: buildSummary() }),
+    });
+  } catch (e) {}
+}
+async function fetchGroup() {
+  const r = await fetch(groupEndpoint(), { headers: { "X-Group": SY.group } });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return (await r.json()).members || {};
+}
+
+function renderBuddy() {
+  TITLE.textContent = "Buddy";
+  SUB.textContent = SY.group ? `Group · ${SY.group}` : "Accountability";
+  if (!SY.group || !SY.name) {
+    VIEW.innerHTML = `
+      <div class="card">
+        <div class="name">Train with a buddy</div>
+        <div class="small muted">Pick a shared group code — you both enter the same one, with your names. Then you each see the other's week: sessions, streak, protein, walking, weight. No raw data, just the scoreboard.</div>
+        <label class="fld"><span class="lt">Your name</span><input id="b-name" placeholder="Nikhil" value="${esc(SY.name || "")}"/></label>
+        <label class="fld"><span class="lt">Group code (6+ chars — share it with your buddy)</span><input id="b-group" placeholder="e.g. nikpetro25" value="${esc(SY.group || "")}"/></label>
+        <button class="btn good" id="b-join" style="margin-top:12px">Join group</button>
+        ${SY.key ? "" : `<div class="tiny muted" style="margin-top:10px">Tip: turn on Sync (More) too, so your progress publishes automatically.</div>`}
+      </div>`;
+    document.getElementById("b-join").onclick = () => {
+      const name = document.getElementById("b-name").value.trim();
+      const group = document.getElementById("b-group").value.trim();
+      if (!name) { toast("Enter your name"); return; }
+      if (group.length < 6) { toast("Group code 6+ chars"); return; }
+      SY.name = name; SY.group = group; saveSync();
+      publishSummary(); toast("Joined"); renderBuddy();
+    };
+    return;
+  }
+  VIEW.innerHTML = `<div class="card tight small muted">Loading group…</div>`;
+  publishSummary();
+  fetchGroup().then((members) => {
+    const names = Object.keys(members).sort((a, b) => (a === SY.name ? -1 : b === SY.name ? 1 : 0));
+    let html = `<div class="card tight"><div class="row"><span class="small">Group code: <b>${esc(SY.group)}</b></span><button class="linkbtn" id="b-refresh">Refresh</button></div>
+      <div class="tiny muted" style="margin-top:5px">Share that code with your buddy so they can join.</div></div>`;
+    if (!names.length) html += `<div class="chart-empty">No members yet — share your code.</div>`;
+    for (const n of names) {
+      const s = (members[n] && members[n].summary) || {};
+      const at = members[n] && members[n].at;
+      const you = n === SY.name;
+      const wk = s.weekSessions ?? 0, wt = s.weekTarget ?? 4;
+      const wpct = wt ? Math.min(100, Math.round((wk / wt) * 100)) : 0;
+      const lastAgo = s.lastSession != null ? daysAgo(s.lastSession) : null;
+      const stale = lastAgo == null || lastAgo >= 3;
+      const lastTxt = lastAgo == null ? "no sessions yet" : lastAgo === 0 ? "trained today" : lastAgo + "d since session";
+      html += `<div class="blk-title"><span class="dot"></span>${esc(n)}${you ? " · you" : ""}</div>
+        <div class="card">
+          <div class="row"><span class="bignum">${wk}<span class="unit"> / ${wt} this week</span></span>
+            <span class="pill ${wk >= wt ? "good" : "acc"}">${s.streak || 0} wk streak</span></div>
+          <div class="pbar"><div class="pbar-fill" style="width:${wpct}%"></div></div>
+          <div class="meta" style="margin-top:10px">
+            <span class="pill ${stale ? "warn" : "good"}">${lastTxt}</span>
+            ${s.proteinAvg != null ? `<span class="pill">protein ${s.proteinAvg}${s.proteinTarget ? "/" + s.proteinTarget : ""}g</span>` : ""}
+            ${s.walkAvg != null ? `<span class="pill">walk ${s.walkAvg}m/d</span>` : ""}
+            ${s.weight != null ? `<span class="pill">${s.weight}lb${s.weightDelta != null ? ` (${s.weightDelta > 0 ? "+" : ""}${s.weightDelta})` : ""}</span>` : ""}
+          </div>
+          <div class="tiny muted" style="margin-top:8px">${s.totalWorkouts || 0} total workouts${at ? " · updated " + daysAgo(toDate(at)) + "d ago" : ""}</div>
+        </div>`;
+    }
+    html += `<button class="btn ghost" id="b-leave" style="margin-top:16px">Leave group</button>`;
+    VIEW.innerHTML = html;
+    document.getElementById("b-refresh").onclick = () => renderBuddy();
+    document.getElementById("b-leave").onclick = () => { SY.group = null; saveSync(); renderBuddy(); };
+  }).catch((e) => {
+    VIEW.innerHTML = `<div class="card"><div class="small">Couldn't load group: ${esc(e.message)}</div><button class="btn ghost" id="b-retry" style="margin-top:10px">Retry</button></div>`;
+    document.getElementById("b-retry").onclick = () => renderBuddy();
+  });
 }
 
 /* ---------- date / util ---------- */
@@ -387,7 +488,7 @@ let current = "today";
 function setTab(tab) {
   current = tab;
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
-  ({ today: renderToday, checkin: renderCheckin, progress: renderProgress, more: renderMore }[tab])();
+  ({ today: renderToday, checkin: renderCheckin, progress: renderProgress, buddy: renderBuddy, more: renderMore }[tab])();
   VIEW.scrollTop = 0; window.scrollTo(0, 0);
 }
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
