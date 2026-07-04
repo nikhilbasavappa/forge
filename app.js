@@ -4,12 +4,13 @@
 const KEY = "forge.v1";
 const DEFAULT_STATE = {
   v: 1,
-  profile: { heightIn: 68, startWeight: 155, proteinTarget: 155, weeklyTarget: 4, restDefault: 90 },
+  profile: { heightIn: 68, startWeight: 155, proteinTarget: 155, weeklyTarget: 4, restDefault: 90, walkTarget: 30 },
   programIndex: 0,        // which session in SESSION_ORDER is next
   workouts: [],           // {id, date, sessionKey, entries:[{exId, variation, sets:[{reps,load,unit,rpe}]}], note}
   checkins: [],           // {date, energy(1-5), sleep(hrs), pains:[{area,sev(0-3)}], note}
   measurements: [],       // {date, weight, waist, chest, arm}
   nutrition: [],          // {date, protein(g), _m}
+  walks: [],              // {date, min, _m}
   equipment: { dumbbells: false, suspension: false }, // bands + pull-up bar + rower assumed
   swaps: {},              // exId -> replacement exId (persistent)
   deloadWeek: null,       // weekStart string when a deload week is active
@@ -25,6 +26,7 @@ function load() {
     const s = Object.assign(structuredClone(DEFAULT_STATE), parsed);
     s.profile = Object.assign({}, DEFAULT_STATE.profile, s.profile); // backfill new profile fields
     if (!Array.isArray(s.nutrition)) s.nutrition = [];
+    if (!Array.isArray(s.walks)) s.walks = [];
     s.equipment = Object.assign({}, DEFAULT_STATE.equipment, s.equipment);
     if (!s.swaps || typeof s.swaps !== "object") s.swaps = {};
     return s;
@@ -88,6 +90,7 @@ function mergeStates(a, b) {
   out.checkins = mergeByKey(a.checkins, b.checkins, "date");
   out.measurements = mergeByKey(a.measurements, b.measurements, "date");
   out.nutrition = mergeByKey(a.nutrition, b.nutrition, "date");
+  out.walks = mergeByKey(a.walks, b.walks, "date");
   if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.programIndex = b.programIndex; out.equipment = b.equipment; out.swaps = b.swaps; out.deloadWeek = b.deloadWeek; out._m = b._m; }
   return out;
 }
@@ -235,6 +238,15 @@ function setProtein(g) {
   const i = S.nutrition.findIndex((n) => n.date === today());
   const rec = { date: today(), protein: Math.max(0, g), _m: Date.now() };
   if (i >= 0) S.nutrition[i] = rec; else S.nutrition.push(rec);
+  save();
+}
+
+/* ---------- walking (NEAT) ---------- */
+function walkToday() { const w = S.walks.find((x) => x.date === today()); return w ? (+w.min || 0) : 0; }
+function addWalk(m) {
+  const i = S.walks.findIndex((x) => x.date === today());
+  if (i >= 0) S.walks[i] = { ...S.walks[i], min: Math.max(0, (+S.walks[i].min || 0) + m), _m: Date.now() };
+  else S.walks.push({ date: today(), min: Math.max(0, m), _m: Date.now() });
   save();
 }
 
@@ -461,6 +473,20 @@ function renderToday() {
       </div>
     </div>`;
 
+  // walk / NEAT logger
+  const wkMin = walkToday(), wkTgt = S.profile.walkTarget || 0;
+  const wkPct = wkTgt ? Math.min(100, Math.round((wkMin / wkTgt) * 100)) : 0;
+  html += `
+    <div class="blk-title"><span class="dot"></span>Walk today</div>
+    <div class="card">
+      <div class="row"><span class="bignum">${wkMin}<span class="unit"> / ${wkTgt} min</span></span>
+        <span class="pill ${wkMin >= wkTgt && wkTgt ? "good" : "acc"}">${wkPct}%</span></div>
+      <div class="pbar"><div class="pbar-fill" style="width:${wkPct}%"></div></div>
+      <div class="qadd">
+        ${[10, 20, 30].map((m) => `<button class="qbtn" data-walk="${m}">+${m}</button>`).join("")}
+      </div>
+    </div>`;
+
   for (const blk of sess.blocks) {
     html += `<div class="blk-title"><span class="dot"></span>${esc(blk.title)}</div><div class="card">`;
     for (const rawId of blk.ex) {
@@ -494,6 +520,7 @@ function renderToday() {
   document.querySelectorAll("[data-protein]").forEach((b) => b.onclick = () => { addProtein(+b.dataset.protein); renderToday(); });
   const pset = document.getElementById("p-set");
   if (pset) pset.onchange = (e) => { const v = e.target.value.trim(); if (v !== "") { setProtein(Number(v)); renderToday(); } };
+  document.querySelectorAll("[data-walk]").forEach((b) => b.onclick = () => { addWalk(+b.dataset.walk); renderToday(); });
 }
 
 /* ---------- GUIDED WORKOUT RUNNER ---------- */
@@ -933,6 +960,8 @@ function buildExport() {
     const avg = Math.round(recentN.reduce((s, n) => s + (+n.protein || 0), 0) / recentN.length);
     md += `- Protein: avg ${avg} g/day over ${recentN.length} logged days (target ${S.profile.proteinTarget})\n`;
   } else { md += `- Protein: not logged\n`; }
+  const recentWk = S.walks.filter((w) => daysAgo(w.date) <= 8 && w.min != null);
+  if (recentWk.length) { const wavg = Math.round(recentWk.reduce((s, w) => s + (+w.min || 0), 0) / recentWk.length); md += `- Walking: avg ${wavg} min/day over ${recentWk.length} days\n`; }
   const sc = S.checkins.filter((c) => c.sleep != null);
   if (sc.length) {
     const avgH = (sc.reduce((s, c) => s + (+c.sleep), 0) / sc.length).toFixed(1);
@@ -990,6 +1019,7 @@ function renderMore() {
         <label class="fld"><span class="lt">Start weight (lb)</span><input id="p-w" inputmode="decimal" value="${esc(S.profile.startWeight)}"/></label>
         <label class="fld"><span class="lt">Protein target (g)</span><input id="p-prot" inputmode="numeric" value="${esc(S.profile.proteinTarget)}"/></label>
         <label class="fld"><span class="lt">Sessions / week</span><input id="p-wk" inputmode="numeric" value="${esc(S.profile.weeklyTarget)}"/></label>
+        <label class="fld"><span class="lt">Walk target (min)</span><input id="p-walk" inputmode="numeric" value="${esc(S.profile.walkTarget)}"/></label>
       </div>
       <button class="btn" id="p-save" style="margin-top:12px">Save profile</button>
     </div>
@@ -1026,6 +1056,7 @@ function renderMore() {
     S.profile.startWeight = Number(document.getElementById("p-w").value) || S.profile.startWeight;
     S.profile.proteinTarget = Number(document.getElementById("p-prot").value) || S.profile.proteinTarget;
     S.profile.weeklyTarget = Number(document.getElementById("p-wk").value) || S.profile.weeklyTarget;
+    S.profile.walkTarget = Number(document.getElementById("p-walk").value) || S.profile.walkTarget;
     S._m = Date.now();
     save(); toast("Profile saved");
   };
