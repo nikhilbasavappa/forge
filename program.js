@@ -68,14 +68,14 @@ const EXERCISES = {
   // ---- Push (chest = priority weak spot; conservative on the shoulder) ----
   pushup_prog: {
     name: "Push-Up Progression", cat: "push", load: "reps", target: { sets: 3, lo: 6, hi: 12 },
-    ladder: ["Hands elevated (high)", "Hands elevated (low)", "Knee push-up", "Full push-up", "Feet elevated", "Weighted / band"],
-    cue: "Hands under shoulders, elbows ~45°, body straight. Lower under control. Higher hands = easier.",
-    q: "push up progression beginner"
+    ladder: ["Hands elevated (high)", "Hands elevated (low)", "Knee push-up", "Full push-up", "Feet elevated (upper chest)", "Weighted / band"],
+    cue: "Hands under shoulders, elbows ~45°, body straight, lower under control. Higher hands = easier. Once strong, elevate the FEET (chair/bed) — that shifts the work to the upper chest, your lagging area.",
+    q: "decline push up upper chest"
   },
   band_press: {
     name: "Band / Floor Chest Press", cat: "push", load: "band", target: { sets: 3, lo: 10, hi: 15 },
-    cue: "Press forward, adduct across the chest at lockout. Control the return.",
-    q: "resistance band chest press"
+    cue: "Press LOW-TO-HIGH — hands start low, drive up and together — to bias the upper chest (your lagging area). Adduct across the chest at lockout, control the return.",
+    q: "low to high band chest press upper chest"
   },
   pike_pushup: {
     name: "Pike Push-Up", cat: "push", load: "reps", target: { sets: 2, lo: 6, hi: 10 },
@@ -89,8 +89,13 @@ const EXERCISES = {
   },
   band_fly: {
     name: "Band Chest Fly", cat: "push", load: "band", target: { sets: 3, lo: 12, hi: 15 },
-    cue: "Anchor behind you, slight fixed elbow bend. Arc the hands together in front and squeeze the chest; control the stretch. Isolates the pecs without loading the triceps.",
-    q: "resistance band chest fly"
+    cue: "Anchor LOW behind you and arc the hands up-and-together (low-to-high) to hit the upper chest. Slight fixed elbow bend, squeeze the chest, control the stretch. Isolates the pecs without loading the triceps.",
+    q: "low to high band chest fly upper chest"
+  },
+  lateral_raise: {
+    name: "Lateral Raise (delt width)", cat: "push", load: "band", target: { sets: 3, lo: 12, hi: 20 },
+    cue: "Raise out to shoulder height, slight forward tilt, pinkies leading; control the descent. Light and strict — this is the side-delt 'cap' for shoulder width. Water bottles work if you've no bands/dumbbells yet.",
+    q: "dumbbell lateral raise side delt form"
   },
   band_curl: {
     name: "Biceps Curl (supinated)", cat: "pull", load: "band", target: { sets: 3, lo: 8, hi: 15 },
@@ -185,9 +190,9 @@ const EXERCISES = {
     q: "diamond push up exercise"
   },
   deep_pushup: {
-    name: "Deep / Wide Push-Up (chest)", cat: "push", load: "reps", target: { sets: 3, lo: 8, hi: 12 },
-    cue: "Hands on books so the chest sinks below them — a deeper pec stretch — or go wide. Control the bottom. The bodyweight chest-fly stand-in.",
-    q: "deficit push up chest stretch"
+    name: "Deep / Feet-Elevated Push-Up (chest)", cat: "push", load: "reps", target: { sets: 3, lo: 8, hi: 12 },
+    cue: "Feet up on a chair/bed to bias the UPPER chest (your lagging area), or hands on books for a deeper pec stretch. Control the bottom. The bodyweight chest-fly stand-in.",
+    q: "feet elevated decline push up upper chest"
   },
   backpack_curl: {
     name: "Backpack Curl", cat: "pull", load: "weight", target: { sets: 3, lo: 10, hi: 15 },
@@ -211,31 +216,31 @@ const EXERCISES = {
  */
 const SESSIONS = {
   A: {
-    name: "A · Pull, Chest & Arms",
-    focus: "Back, rear delts, chest, biceps (peak + thickness), core",
+    name: "A · Back, Rear Delts & Arms",
+    focus: "Mid-back density, lats, rear delts, biceps, core",
     blocks: [
       { title: "Prehab", ex: ["wall_slides", "scap_pushup", "thoracic_open"] },
-      { title: "Strength", ex: ["pullup_prog", "trx_row", "face_pull", "band_press", "band_curl", "hammer_curl"] },
+      { title: "Strength", ex: ["pullup_prog", "trx_row", "face_pull", "band_curl", "hammer_curl"] },
       { title: "Core", ex: ["dead_bug", "hanging_knee"] },
       { title: "Conditioning", ex: ["row_steady"] },
     ],
   },
   B: {
-    name: "B · Push & Legs",
-    focus: "Chest (priority) + triceps, legs, core",
+    name: "B · Chest & Delts",
+    focus: "Chest (upper bias), side delts, triceps, legs, core",
     blocks: [
       { title: "Prehab", ex: ["wall_slides", "face_pull", "prone_ytw"] },
-      { title: "Strength", ex: ["pushup_prog", "band_fly", "band_pressdown", "goblet_squat", "split_squat"] },
+      { title: "Strength", ex: ["pushup_prog", "band_press", "lateral_raise", "band_pressdown", "goblet_squat"] },
       { title: "Core", ex: ["plank", "pallof"] },
       { title: "Conditioning", ex: ["row_steady"] },
     ],
   },
   C: {
     name: "C · Full Body & Engine",
-    focus: "Posterior chain, chest, rear delts, biceps, engine",
+    focus: "Mid-back, chest (upper), rear delts, hamstrings, engine",
     blocks: [
       { title: "Prehab", ex: ["scap_pushup", "prone_ytw", "thoracic_open"] },
-      { title: "Strength", ex: ["rdl", "trx_row", "face_pull", "band_press", "hammer_curl"] },
+      { title: "Strength", ex: ["band_row", "band_fly", "face_pull", "rdl", "hammer_curl"] },
       { title: "Core", ex: ["hollow_hold", "hanging_knee"] },
       { title: "Conditioning", ex: ["row_intervals"] },
     ],
@@ -252,6 +257,7 @@ const ALTS = {
   pullup_prog: ["chinup_prog", "trx_row", "band_row"],
   trx_row: ["band_row", "prone_row", "pullup_prog"],
   band_row: ["trx_row", "prone_row"],
+  lateral_raise: ["pike_pushup", "prone_ytw"],
   band_press: ["pushup_prog", "band_fly", "deep_pushup"],
   pushup_prog: ["band_press", "band_fly", "deep_pushup"],
   band_fly: ["deep_pushup", "pushup_prog", "band_press"],
@@ -287,7 +293,7 @@ const ALTS = {
 
 /* One-tap "no bands yet" mode — maps band moves to bodyweight/household equivalents. */
 const BW_SWAPS = {
-  band_press: "pushup_prog",
+  band_press: "deep_pushup",
   band_fly: "deep_pushup",
   band_pressdown: "diamond_pushup",
   band_pull_apart: "prone_ytw",
@@ -296,4 +302,5 @@ const BW_SWAPS = {
   hammer_curl: "backpack_curl",
   pallof: "bird_dog",
   rdl: "sl_rdl",
+  band_row: "trx_row",
 };
