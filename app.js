@@ -933,6 +933,66 @@ function renderReview() {
   };
 }
 
+function renderHelp() {
+  TITLE.textContent = "Help & guide";
+  SUB.textContent = "How Forge works";
+  const d = (term, desc) => `<div class="ex"><div class="name">${term}</div><div class="cue">${desc}</div></div>`;
+  VIEW.innerHTML = `
+    <button class="btn ghost sm" id="hp-back" style="margin:8px 0 6px">← Back</button>
+
+    <div class="blk-title"><span class="dot"></span>The daily flow</div>
+    <div class="card">
+      ${d("1 · Check in", "15 seconds: energy, sleep, pain. Sets your <b>readiness</b> for the day and adjusts today's targets.")}
+      ${d("2 · Start &amp; log session", "The guided runner walks you through each exercise one at a time, with a target and a rest timer.")}
+      ${d("3 · Protein &amp; walk", "Tap to log them through the day, against your targets.")}
+      ${d("Weekly", "Log measurements + a photo, then More → Weekly review, and send me the export to re-tune.")}
+    </div>
+
+    <div class="blk-title"><span class="dot"></span>Reading a workout</div>
+    <div class="card">
+      ${d("3×8–12", "3 sets of 8 to 12 reps. \"/side\" means per side. Timed work shows minutes:seconds (5:00 = 5 min).")}
+      ${d("RPE (6–10)", "How hard the set felt. 10 = nothing left in the tank; 8 ≈ 2 reps in reserve. <b>Log it honestly</b> — the app uses it to decide when to push you.")}
+      ${d("Target", "The number to beat, pre-filled with what you actually did last time.")}
+      ${d("Swap", "Sub an exercise (e.g. the shoulder flares up). It sticks for future sessions; undo in More → Equipment.")}
+      ${d("Variation", "For progressions (push-up, pull-up, chin-up) — which rung of the ladder you're on.")}
+      ${d("Rest timer", "Tap a preset; it counts down and beeps/vibrates at zero.")}
+    </div>
+
+    <div class="blk-title"><span class="dot"></span>Readiness (0–100)</div>
+    <div class="card">
+      <div class="cue" style="margin:2px 0 10px">A daily score from your check-in that scales the whole session — both directions.</div>
+      ${d("How it's built", "Starts ~60 (a normal day). <b>Energy</b> is the biggest lever. Good sleep &amp; quality add; poor subtract. Pain flags subtract (shoulder counts double). Several days training in a row subtract a little for fatigue. Capped 0–100.")}
+      ${d("What it does", "<b>Primed</b> (75+): full or +1 set, push load. <b>Ready</b> (58+): normal. <b>Moderate</b> (44+): one less set. <b>Low</b> (&lt;44): cut sets ~40%, easy targets.")}
+    </div>
+
+    <div class="blk-title"><span class="dot"></span>How it adapts</div>
+    <div class="card">
+      ${d("Progression", "Double progression: beat last time's reps within the range. Hit the <b>top</b> of the range at an easy RPE → it tells you to add load or a harder variation.")}
+      ${d("Momentum", "Clear a lift's top range two sessions running → \"cruising,\" it pushes you to load up instead of creeping one rep at a time.")}
+      ${d("Stall", "No new best in 3 sessions on a lift → it suggests swapping or deloading <i>that</i> lift so you don't grind a plateau.")}
+      ${d("Deload", "A lighter recovery week, auto-flagged after shoulder pain 3+ days, low energy 3+ days, or ~4 weeks training straight. Cuts volume ~40%, holds load.")}
+      ${d("Recovery nudge", "5+ days in a row → suggests a mobility day.")}
+    </div>
+
+    <div class="blk-title"><span class="dot"></span>Sessions &amp; routines</div>
+    <div class="card">
+      ${d("A / B / C rotation", "Do \"the next one\" whenever you train — 3 or 5 days a week both work, and travel never breaks the plan.")}
+      ${d("Prehab", "The short scapula/posture warm-up block that opens each session.")}
+      ${d("Daily prehab / Mobility", "Standalone off-day routines (dead hangs, stretches). Guided, not logged.")}
+      ${d("Bodyweight mode", "More → Equipment. One tap swaps every band/dumbbell move to a bodyweight or backpack version when you've no gear.")}
+    </div>
+
+    <div class="blk-title"><span class="dot"></span>Buddy &amp; data</div>
+    <div class="card">
+      ${d("Buddy", "Join a shared group code with a friend to see each other's weekly progress. Enable notifications to get pinged when they train, or Poke them.")}
+      ${d("Streak", "Consecutive weeks you hit your session target.")}
+      ${d("Your data", "Stored on your device. Sync (More) backs it up and shares it across <i>your</i> devices via a passphrase. Buddy shares only summaries — never your raw log. Photos never leave your phone.")}
+    </div>
+
+    <div class="card tight tiny muted center">The app is the day-to-day coach; the weekly export to Claude is the strategy layer. Log honestly — it only gets smarter with real data.</div>`;
+  document.getElementById("hp-back").onclick = () => setTab("more");
+}
+
 function finishRun() {
   if (RUN.isPrehab) { const t = RUN.title || "Prehab"; stopRest(); RUN = null; toast(t + " done"); setTab("today"); return; }
   const entries = Object.entries(RUN.data).map(([exId, sets]) => {
@@ -1247,6 +1307,7 @@ function renderMore() {
   SUB.textContent = "Review · sync · export";
   VIEW.innerHTML = `
     <button class="btn good" id="open-review" style="margin:6px 0 4px">Weekly review →</button>
+    <button class="btn ghost" id="open-help" style="margin:8px 0 4px">Help &amp; guide</button>
     <div class="blk-title"><span class="dot"></span>Sync across devices</div>
     <div class="card">
       <div class="small muted" id="sync-status">${esc(syncStatusText())}</div>
@@ -1296,6 +1357,7 @@ function renderMore() {
     <div id="exp-out"></div>`;
 
   document.getElementById("open-review").onclick = () => renderReview();
+  document.getElementById("open-help").onclick = () => renderHelp();
   document.getElementById("exp-copy").onclick = async () => {
     const md = buildExport();
     try { await navigator.clipboard.writeText(md); toast("Copied — paste to Claude"); }
