@@ -263,15 +263,70 @@ function resolveEx(exId) { return (S.swaps && S.swaps[exId]) || exId; }
 function isBodyweightMode() { return typeof BW_SWAPS !== "undefined" && S.swaps && S.swaps.band_curl === BW_SWAPS.band_curl && S.swaps.band_press === BW_SWAPS.band_press; }
 function dumbbellMode(ex) { return S.equipment && S.equipment.dumbbells && ex.load === "band" && /curl|press|fly|row|squat|rdl|pressdown/i.test(ex.name + " " + (ex.cat || "")); }
 
-// Auto-progression: concrete per-set targets from history + today's readiness.
+/* ---------- smart engine: readiness, momentum, stalls, cadence ---------- */
+function daysBetween(a, b) { return Math.round((new Date(b.replace(/-/g, "/")) - new Date(a.replace(/-/g, "/"))) / 86400000); }
+function trainingDates() { return [...new Set(S.workouts.map((w) => w.date))].sort(); }
+function consecutiveTrainingDays() {
+  const dates = trainingDates(); if (!dates.length) return 0;
+  const set = new Set(dates);
+  if (daysAgo(dates[dates.length - 1]) > 1) return 0;
+  let count = 0, cur = new Date(dates[dates.length - 1].replace(/-/g, "/"));
+  while (set.has(toDate(cur.getTime()))) { count++; cur.setDate(cur.getDate() - 1); }
+  return count;
+}
+function medianGap() {
+  const dates = trainingDates(); if (dates.length < 3) return 3;
+  const gaps = []; for (let i = 1; i < dates.length; i++) gaps.push(daysBetween(dates[i - 1], dates[i]));
+  gaps.sort((a, b) => a - b); return gaps[Math.floor(gaps.length / 2)] || 3;
+}
+function exHistory(exId) {
+  const out = [];
+  S.workouts.forEach((w) => {
+    const e = w.entries.find((x) => x.exId === exId); if (!e) return;
+    const sets = e.sets.filter((s) => s.reps != null); if (!sets.length) return;
+    out.push({ date: w.date, top: Math.max(...sets.map((s) => +s.reps || 0)), rpe: Math.max(0, ...sets.map((s) => +s.rpe || 0)) || null });
+  });
+  return out;
+}
+function momentum(exId, ex) {
+  if (ex.load === "time") return false;
+  const h = exHistory(exId); if (h.length < 2) return false;
+  return h.slice(-2).every((s) => s.top >= ex.target.hi && (!s.rpe || s.rpe <= 8));
+}
+function isStalled(exId, ex) {
+  if (ex.load === "time") return false;
+  const h = exHistory(exId); if (h.length < 3) return false;
+  const w = h.slice(-3);
+  return Math.max(...w.map((s) => s.top)) <= w[0].top; // no new high across 3 sessions
+}
+// Blended daily readiness 0–100 from energy, sleep, quality, pain, accumulated fatigue.
+function readiness() {
+  const ci = todaysCheckin();
+  if (!ci || !ci.energy) return null;
+  let s = 60 + (ci.energy - 3) * 12;
+  if (ci.sleep != null) s += Math.max(-24, Math.min(8, (ci.sleep - 7) * 6));
+  if (ci.sleepQuality) s += (ci.sleepQuality - 3) * 6;
+  (ci.pains || []).forEach((p) => { s -= (p.sev || 0) * (/scapula|shoulder/i.test(p.area) ? 9 : 6); });
+  const consec = consecutiveTrainingDays();
+  if (consec >= 4) s -= (consec - 3) * 6;
+  s = Math.max(0, Math.min(100, Math.round(s)));
+  const band = s >= 75 ? "primed" : s >= 58 ? "ready" : s >= 44 ? "moderate" : "low";
+  return { score: s, band };
+}
+
+// Auto-progression: per-set targets scaled by readiness (both directions) + momentum.
 function prescribe(exId) {
   const ex = EXERCISES[exId];
   const last = lastEntry(exId);
-  const ci = todaysCheckin();
-  const lowEnergy = ci && ci.energy && ci.energy <= 2;
   const deload = deloadActive();
-  let setsCount = Math.max(1, ex.target.sets - (lowEnergy ? 1 : 0));
+  const rd = readiness();
+  const mo = momentum(exId, ex);
+  let setsCount = ex.target.sets;
   if (deload) setsCount = Math.max(1, Math.ceil(ex.target.sets * 0.6));
+  else if (rd && rd.band === "low") setsCount = Math.max(1, Math.ceil(ex.target.sets * 0.6));
+  else if (rd && rd.band === "moderate") setsCount = Math.max(1, ex.target.sets - 1);
+  else if (rd && rd.band === "primed" && mo && ex.load !== "time") setsCount = ex.target.sets + 1;
+
   if (!last) {
     const base = ex.load === "time" ? ex.target.sec : ex.target.lo;
     return { setsCount, perSet: Array.from({ length: setsCount }, () => ({ reps: base, last: null, load: null })), note: "Baseline — find a clean working weight" };
@@ -296,9 +351,12 @@ function prescribe(exId) {
     perSet.forEach((p) => { p.addLoad = false; if (p.last != null) p.reps = p.last; });
     return { setsCount, perSet, note: "Deload — lighter, leave 2–3 reps in reserve" };
   }
-  const note = anyAdd ? "Cleared the range — add load this time"
-    : lowEnergy ? "Low energy — one less set, keep form"
-    : ex.load === "time" ? "Beat last time's hold" : "Beat last time's reps";
+  let note;
+  if (rd && rd.band === "low") note = "Low readiness — cut it back, easy sets";
+  else if (rd && rd.band === "moderate") note = "Moderate readiness — one less set";
+  else if (mo) note = rd && rd.band === "primed" ? "Primed + cruising — add a set and load" : "Cruising — add load or a harder variation";
+  else if (anyAdd) note = "Cleared the range — add load this time";
+  else note = ex.load === "time" ? "Beat last time's hold" : "Beat last time's reps";
   return { setsCount, perSet, note };
 }
 
@@ -317,13 +375,15 @@ function suggest(exId) {
   const last = lastEntry(exId);
   const ci = todaysCheckin();
   // readiness gates
-  const lowEnergy = ci && ci.energy && ci.energy <= 2;
+  const rd = readiness();
   const shoulderPain = ci && (ci.pains || []).some((p) =>
     p.sev >= 2 && /scapula|shoulder/i.test(p.area));
   if (shoulderPain && (ex.cat === "push" || exId === "pike_pushup")) {
     return { lvl: "bad", text: "Shoulder flagged: regress or skip" };
   }
-  if (lowEnergy) return { lvl: "warn", text: "Low energy: 2 sets" };
+  if (isStalled(exId, ex)) return { lvl: "warn", text: "Stalled 3 sessions: swap or deload this lift" };
+  if (rd && rd.band === "low") return { lvl: "warn", text: "Low readiness: cut sets, keep form" };
+  if (momentum(exId, ex)) return { lvl: "good", text: "Cruising: push load or harder variation" };
   if (!last) return { lvl: "acc", text: "No history yet" };
 
   const sets = last.entry.sets.filter((s) => s.reps != null || s.load != null);
@@ -423,7 +483,7 @@ function deloadReason() {
 }
 function daysSinceLastWorkout() {
   if (!S.workouts.length) return null;
-  return daysAgo(S.workouts[S.workouts.length - 1].date);
+  return Math.min(...S.workouts.map((w) => daysAgo(w.date)));
 }
 
 const PREHAB_ROUTINE = ["wall_slides", "scap_pushup", "band_pull_apart", "face_pull", "prone_ytw", "thoracic_open"];
@@ -550,7 +610,9 @@ function renderToday() {
   TITLE.textContent = "Today";
   SUB.textContent = prettyDate(today());
 
-  const readiness = ci
+  const rd = readiness();
+  const rdPill = rd ? `<span class="pill ${rd.band === "low" ? "warn" : rd.band === "primed" ? "good" : "acc"}">Readiness ${rd.score} · ${rd.band}</span>` : "";
+  const readinessTags = ci
     ? `<span class="pill ${ci.energy >= 4 ? "good" : ci.energy <= 2 ? "warn" : "acc"}">Energy ${ci.energy}/5</span>
        <span class="pill">Sleep ${ci.sleep ?? "–"}h</span>
        ${(ci.pains || []).filter((p) => p.sev > 0).length ? `<span class="pill bad">${(ci.pains || []).filter((p) => p.sev > 0).length} pain flag(s)</span>` : `<span class="pill good">No pain flags</span>`}`
@@ -572,20 +634,23 @@ function renderToday() {
           <div class="mast-focus">${esc(sess.focus)}</div>
         </div>
       </div>
-      <div class="mast-meta">${readiness}${weekPill}</div>
+      <div class="mast-meta">${rdPill}${readinessTags}${weekPill}</div>
       <button class="btn good" id="start-log" style="margin-top:18px">Start &amp; log session →</button>
       ${ci ? "" : `<div class="tip">Check in first to adjust today's targets.</div>`}
     </div>`;
 
-  // deload banner + nudges
+  // deload banner + smart nudges
+  const consec = consecutiveTrainingDays();
   if (deloadActive()) {
     html += `<div class="banner warn"><div>Deload week active — lighter loads, full recovery.</div><button class="linkbtn" id="deload-off">End</button></div>`;
   } else {
     const dr = deloadReason();
     if (dr) html += `<div class="banner"><div>${esc(dr)}</div><button class="linkbtn" id="deload-on">Start deload</button></div>`;
+    else if (consec >= 5) html += `<div class="banner warn"><div>${consec} days straight — take a recovery day.</div><button class="linkbtn" id="rec-mob">Mobility →</button></div>`;
   }
   const dslw = daysSinceLastWorkout();
-  if (dslw != null && dslw >= 3) html += `<div class="banner"><div>${dslw} days since your last session.</div></div>`;
+  const gap = medianGap();
+  if (dslw != null && dslw >= Math.max(2, gap + 1)) html += `<div class="banner"><div>${dslw} days since your last session — your usual is about ${gap}.</div></div>`;
 
   // protein quick-logger
   const pt = proteinToday(), ptgt = S.profile.proteinTarget || 0;
@@ -641,6 +706,7 @@ function renderToday() {
   document.getElementById("start-mobility").onclick = () => startMobility();
   const dOn = document.getElementById("deload-on"); if (dOn) dOn.onclick = () => { S.deloadWeek = weekStartStr(new Date()); S._m = Date.now(); save(); toast("Deload week on"); renderToday(); };
   const dOff = document.getElementById("deload-off"); if (dOff) dOff.onclick = () => { S.deloadWeek = null; S._m = Date.now(); save(); renderToday(); };
+  const rm = document.getElementById("rec-mob"); if (rm) rm.onclick = () => startMobility();
   document.querySelectorAll("[data-exhist]").forEach((el) => el.onclick = () => renderExercise(el.dataset.exhist));
   document.getElementById("switch-sess").onclick = () => {
     const cur = SESSION_ORDER.indexOf(key);
@@ -667,7 +733,7 @@ function startMobility() {
   RUN = { key: "Mobility", list: MOBILITY_ROUTINE.slice(), idx: 0, startTs: Date.now(), data: {}, isPrehab: true, title: "Mobility & stretch" };
   renderRunner();
 }
-function prescribeLvl(p) { return /add load/i.test(p.note) ? "good" : /low energy|deload/i.test(p.note) ? "warn" : "acc"; }
+function prescribeLvl(p) { return /add load|cruising/i.test(p.note) ? "good" : /readiness|deload/i.test(p.note) ? "warn" : "acc"; }
 function runnerLoadCell(ex, i, val) {
   if (ex.load === "reps" || !ex.load) return `<div class="tiny muted center">BW</div>`;
   if (ex.load === "time") return `<input data-set="${i}" data-f="load" placeholder="—" value="${esc(val ?? "")}" />`;
