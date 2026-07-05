@@ -117,6 +117,27 @@ async function syncNow(opts = {}) {
 
 /* ---------- buddy accountability ---------- */
 function groupEndpoint() { return (SY.url || SYNC_ENDPOINT).replace(/\/state$/, "/group"); }
+function pokeEndpoint() { return (SY.url || SYNC_ENDPOINT).replace(/\/state$/, "/poke"); }
+const VAPID_PUBLIC = "BJLYgTutp5l4DiFz00NSF0kAnlj5Q9zL5_1tdkLCJJvlGcTaaNZGkvWRbGjtfO8t4memHTeM907mrIa0rteN4Bk";
+function urlB64ToU8(b64) { const pad = "=".repeat((4 - b64.length % 4) % 4); const s = (b64 + pad).replace(/-/g, "+").replace(/_/g, "/"); const raw = atob(s); const u = new Uint8Array(raw.length); for (let i = 0; i < raw.length; i++) u[i] = raw.charCodeAt(i); return u; }
+function idbPutIdentity(id) { return new Promise((res, rej) => { const r = indexedDB.open("forge-buddy", 1); r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains("id")) r.result.createObjectStore("id"); }; r.onsuccess = () => { const tx = r.result.transaction("id", "readwrite"); tx.objectStore("id").put(id, "me"); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }; r.onerror = () => rej(r.error); }); }
+async function enablePush() {
+  if (!("Notification" in window) || !navigator.serviceWorker) { toast("Notifications not supported"); return; }
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") { toast("Notifications blocked — allow in settings"); return; }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToU8(VAPID_PUBLIC) });
+    SY.sub = sub.toJSON(); saveSync();
+    await idbPutIdentity({ group: SY.group, name: SY.name });
+    await publishSummary();
+    toast("Buddy notifications on");
+  } catch (e) { toast("Couldn't enable: " + e.message); }
+}
+async function pokeBuddy(name) {
+  try { await fetch(pokeEndpoint(), { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ group: SY.group, from: SY.name, to: name }) }); toast("Poked " + name); }
+  catch (e) { toast("Poke failed"); }
+}
 function buildSummary() {
   const m = S.measurements.filter((x) => x.weight != null);
   const lastW = m.length ? +m[m.length - 1].weight : null;
@@ -142,7 +163,7 @@ async function publishSummary() {
     await fetch(groupEndpoint(), {
       method: "PUT",
       headers: { "Content-Type": "application/json", "X-Group": SY.group },
-      body: JSON.stringify({ name: SY.name, summary: buildSummary() }),
+      body: JSON.stringify({ name: SY.name, summary: buildSummary(), sub: SY.sub || undefined }),
     });
   } catch (e) {}
 }
@@ -181,6 +202,9 @@ function renderBuddy() {
     const names = Object.keys(members).sort((a, b) => (a === SY.name ? -1 : b === SY.name ? 1 : 0));
     let html = `<div class="card tight"><div class="row"><span class="small">Group code: <b>${esc(SY.group)}</b></span><button class="linkbtn" id="b-refresh">Refresh</button></div>
       <div class="tiny muted" style="margin-top:5px">Share that code with your buddy so they can join.</div></div>`;
+    html += SY.sub
+      ? `<div class="tiny muted" style="margin:0 0 12px">Notifications on — you'll be pinged when a buddy trains or pokes you.</div>`
+      : `<button class="btn ghost" id="b-notif" style="margin-bottom:12px">Enable buddy notifications</button>`;
     if (!names.length) html += `<div class="chart-empty">No members yet — share your code.</div>`;
     for (const n of names) {
       const s = (members[n] && members[n].summary) || {};
@@ -203,12 +227,15 @@ function renderBuddy() {
             ${s.weight != null ? `<span class="pill">${s.weight}lb${s.weightDelta != null ? ` (${s.weightDelta > 0 ? "+" : ""}${s.weightDelta})` : ""}</span>` : ""}
           </div>
           <div class="tiny muted" style="margin-top:8px">${s.totalWorkouts || 0} total workouts${at ? " · updated " + daysAgo(toDate(at)) + "d ago" : ""}</div>
+          ${you ? "" : `<button class="btn ghost sm" data-poke="${esc(n)}" style="margin-top:12px">Poke ${esc(n)}</button>`}
         </div>`;
     }
     html += `<button class="btn ghost" id="b-leave" style="margin-top:16px">Leave group</button>`;
     VIEW.innerHTML = html;
     document.getElementById("b-refresh").onclick = () => renderBuddy();
     document.getElementById("b-leave").onclick = () => { SY.group = null; saveSync(); renderBuddy(); };
+    const bn = document.getElementById("b-notif"); if (bn) bn.onclick = () => enablePush().then(() => renderBuddy());
+    document.querySelectorAll("[data-poke]").forEach((b) => b.onclick = () => pokeBuddy(b.dataset.poke));
   }).catch((e) => {
     VIEW.innerHTML = `<div class="card"><div class="small">Couldn't load group: ${esc(e.message)}</div><button class="btn ghost" id="b-retry" style="margin-top:10px">Retry</button></div>`;
     document.getElementById("b-retry").onclick = () => renderBuddy();
