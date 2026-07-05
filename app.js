@@ -432,6 +432,7 @@ const MOBILITY_ROUTINE = ["dead_hang", "thoracic_open", "doorway_pec", "hip_flex
 /* ---------- rest timer ---------- */
 let restInt = null, restEnd = 0;
 function fmtClock(s) { s = Math.max(0, Math.ceil(s)); return `${Math.floor(s / 60)}:${pad(s % 60)}`; }
+function fmtDur(sec) { return sec >= 60 ? fmtClock(sec) : sec + "s"; }
 function restBeep() {
   try {
     const ac = new (window.AudioContext || window.webkitAudioContext)();
@@ -522,7 +523,7 @@ document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () 
 
 /* ---------- target label ---------- */
 function targetLabel(ex) {
-  if (ex.load === "time") return `${ex.target.sets}×${ex.target.sec}s`;
+  if (ex.load === "time") return `${ex.target.sets}×${fmtDur(ex.target.sec)}`;
   return `${ex.target.sets}×${ex.target.lo}–${ex.target.hi}${ex.side ? "/side" : ""}`;
 }
 function demoLink(ex) {
@@ -695,7 +696,7 @@ function renderRunner() {
     const repsVal = ev && ev.reps != null ? ev.reps : (p.last ?? "");
     const loadVal = ev && ev.load != null ? ev.load : (p.load ?? "");
     const rpeVal = ev && ev.rpe ? ev.rpe : "";
-    const tgt = timed ? `${p.reps}s` : `${p.reps}${p.addLoad ? " +load" : ""}`;
+    const tgt = timed ? fmtDur(p.reps) : `${p.reps}${p.addLoad ? " +load" : ""}`;
     rows += `<div class="setrow">
       <div class="idx">${i + 1}</div>
       <input data-set="${i}" data-f="reps" inputmode="numeric" placeholder="${timed ? "sec" : "reps"}" value="${esc(repsVal)}" />
