@@ -769,6 +769,76 @@ function renderExercise(exId) {
   document.getElementById("ex-back").onclick = () => setTab("today");
 }
 
+function renderReview() {
+  const wkStart = weekStartStr(new Date());
+  TITLE.textContent = "Weekly review";
+  SUB.textContent = "Week of " + prettyDate(wkStart);
+  const inWeek = (ds) => weekStartStr(new Date(ds.replace(/-/g, "/"))) === wkStart;
+  const wkWorkouts = S.workouts.filter((w) => inWeek(w.date));
+  const sw = sessionsThisWeek(), wt = S.profile.weeklyTarget || 4, streak = targetStreakWeeks();
+
+  // PRs this week: top-set reps beat the prior best
+  const prs = [];
+  new Set(wkWorkouts.flatMap((w) => w.entries.map((e) => e.exId))).forEach((exId) => {
+    let before = 0, now = 0;
+    S.workouts.forEach((w) => {
+      const e = w.entries.find((x) => x.exId === exId); if (!e) return;
+      const top = Math.max(0, ...e.sets.map((s) => +s.reps || 0));
+      if (inWeek(w.date)) now = Math.max(now, top); else before = Math.max(before, top);
+    });
+    if (now > before && before > 0) prs.push(`${EXERCISES[exId] ? EXERCISES[exId].name : exId} → ${now}`);
+  });
+
+  // body
+  const m = S.measurements.filter((x) => x.weight != null);
+  const lastW = m.length ? +m[m.length - 1].weight : null;
+  const prevW = (() => { for (let i = m.length - 1; i >= 0; i--) if (!inWeek(m[i].date)) return +m[i].weight; return null; })();
+  const wDelta = (lastW != null && prevW != null) ? +(lastW - prevW).toFixed(1) : null;
+  const lastWaist = (() => { for (let i = m.length - 1; i >= 0; i--) if (m[i].waist != null) return m[i].waist; return null; })();
+
+  // nutrition / walk / sleep this week
+  const wkN = S.nutrition.filter((n) => inWeek(n.date) && n.protein != null);
+  const proteinAvg = wkN.length ? Math.round(wkN.reduce((s, n) => s + (+n.protein || 0), 0) / wkN.length) : null;
+  const proteinHit = wkN.filter((n) => (+n.protein || 0) >= (S.profile.proteinTarget || 0)).length;
+  const wkW = S.walks.filter((w) => inWeek(w.date) && w.min != null);
+  const walkAvg = wkW.length ? Math.round(wkW.reduce((s, w) => s + (+w.min || 0), 0) / wkW.length) : null;
+  const wkC = S.checkins.filter((c) => inWeek(c.date));
+  const sleepV = wkC.filter((c) => c.sleep != null);
+  const sleepAvg = sleepV.length ? (sleepV.reduce((s, c) => s + (+c.sleep), 0) / sleepV.length).toFixed(1) : null;
+  const alcNights = wkC.filter((c) => c.flags && c.flags.alcohol).length;
+
+  const row = (label, val) => `<div class="row small" style="padding:9px 0;border-top:1px solid var(--line)"><span class="muted">${label}</span><span>${val}</span></div>`;
+  VIEW.innerHTML = `
+    <button class="btn ghost sm" id="rv-back" style="margin:8px 0 6px">← Back</button>
+    <div class="masthead" style="border:none;padding-bottom:8px">
+      <div class="mast-main">
+        <div class="mast-letter">${sw}</div>
+        <div class="mast-name"><div class="mast-title">of ${wt} sessions</div><div class="mast-focus">${streak} week on-target streak</div></div>
+      </div>
+    </div>
+    ${prs.length ? `<div class="blk-title"><span class="dot"></span>PRs this week</div><div class="card">${prs.map((p) => `<div class="row small" style="padding:7px 0;border-top:1px solid var(--line)"><span>${esc(p.split(" → ")[0])}</span><span class="pill good">${esc(p.split(" → ")[1])}</span></div>`).join("")}</div>` : ""}
+    <div class="blk-title"><span class="dot"></span>Body</div>
+    <div class="card tight">
+      ${row("Weight", lastW != null ? `${lastW} lb${wDelta != null ? ` <span class="pill ${wDelta <= 0 ? "good" : "acc"}">${wDelta > 0 ? "+" : ""}${wDelta}</span>` : ""}` : "—")}
+      ${row("Waist", lastWaist != null ? `${lastWaist} in` : "not logged")}
+    </div>
+    <div class="blk-title"><span class="dot"></span>Fuel &amp; movement</div>
+    <div class="card tight">
+      ${row("Protein", proteinAvg != null ? `${proteinAvg} g/day avg · hit target ${proteinHit}/${wkN.length}d` : "not logged")}
+      ${row("Walking", walkAvg != null ? `${walkAvg} min/day · ${wkW.length} days` : "not logged")}
+      ${row("Sleep", sleepAvg != null ? `${sleepAvg} h avg` : "not logged")}
+      ${row("Alcohol", `${alcNights} night${alcNights === 1 ? "" : "s"}`)}
+    </div>
+    <div class="blk-title"><span class="dot"></span>Sessions this week</div>
+    <div class="card tight">${wkWorkouts.length ? wkWorkouts.map((w) => `<div class="row small" style="padding:7px 0;border-top:1px solid var(--line)"><span class="muted">${prettyDate(w.date)}</span><span>${esc((SESSIONS[w.sessionKey] || {}).name || w.sessionKey)}</span></div>`).join("") : `<div class="tiny muted">No sessions logged yet this week.</div>`}</div>
+    <button class="btn" id="rv-export" style="margin-top:16px">Copy full summary for Claude</button>`;
+  document.getElementById("rv-back").onclick = () => setTab("more");
+  document.getElementById("rv-export").onclick = async () => {
+    try { await navigator.clipboard.writeText(buildExport()); toast("Copied — paste to Claude"); }
+    catch (e) { toast("Use More → export"); }
+  };
+}
+
 function finishRun() {
   if (RUN.isPrehab) { const t = RUN.title || "Prehab"; stopRest(); RUN = null; toast(t + " done"); setTab("today"); return; }
   const entries = Object.entries(RUN.data).map(([exId, sets]) => {
@@ -1080,8 +1150,9 @@ function buildExport() {
 
 function renderMore() {
   TITLE.textContent = "More";
-  SUB.textContent = "Sync · export · backup";
+  SUB.textContent = "Review · sync · export";
   VIEW.innerHTML = `
+    <button class="btn good" id="open-review" style="margin:6px 0 4px">Weekly review →</button>
     <div class="blk-title"><span class="dot"></span>Sync across devices</div>
     <div class="card">
       <div class="small muted" id="sync-status">${esc(syncStatusText())}</div>
@@ -1130,6 +1201,7 @@ function renderMore() {
     </div>
     <div id="exp-out"></div>`;
 
+  document.getElementById("open-review").onclick = () => renderReview();
   document.getElementById("exp-copy").onclick = async () => {
     const md = buildExport();
     try { await navigator.clipboard.writeText(md); toast("Copied — paste to Claude"); }
