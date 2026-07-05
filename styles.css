@@ -22,7 +22,7 @@ html, body {
   overscroll-behavior-y: none; -webkit-font-smoothing: antialiased;
   font-variant-numeric: tabular-nums;
 }
-#app { display: flex; flex-direction: column; min-height: 100svh; }
+#app { display: flex; flex-direction: column; min-height: 100svh; max-width: 600px; margin: 0 auto; }
 
 /* ---- top bar ---- */
 #topbar {
@@ -42,7 +42,8 @@ html, body {
 
 /* ---- tab bar ---- */
 #tabbar {
-  position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
+  position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 100%; max-width: 600px; z-index: 20;
   display: grid; grid-template-columns: repeat(5, 1fr);
   background: var(--paper); border-top: 1px solid var(--ink);
   padding-bottom: env(safe-area-inset-bottom);
@@ -177,7 +178,7 @@ input::placeholder { color: var(--mut); opacity: 0.7; }
 .seg.pain button.on { background: var(--ox); color: var(--paper); }
 
 /* ---- charts ---- */
-.chart { width: 100%; height: 116px; display: block; margin-top: 6px; }
+.chart { width: 100%; height: auto; display: block; margin-top: 6px; }
 .chart-empty {
   font-family: var(--m); color: var(--mut); font-size: 0.74rem; text-transform: uppercase;
   letter-spacing: 0.1em; padding: 22px 0; text-align: center; border: 1px solid var(--line);

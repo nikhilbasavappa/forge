@@ -476,7 +476,7 @@ function barChart(items, color, target) {
   });
   let tline = "";
   if (target) { const y = (H - pb) - (target / max) * (H - pb); tline = `<line x1="0" y1="${y.toFixed(1)}" x2="${W}" y2="${y.toFixed(1)}" stroke="${color}" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>`; }
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}${tline}</svg>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}">${bars}${tline}</svg>`;
 }
 
 /* ---------- router ---------- */
@@ -889,7 +889,7 @@ function lineChart(points, color, opts = {}) {
   const dots = points.map((p) => `<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="2.5" fill="${color}"/>`).join("");
   const last = points[points.length - 1].y, first = points[0].y;
   const lbl = opts.fmt ? opts.fmt(last) : last;
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}">
     <path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>${dots}
     <text x="${W - pr}" y="12" fill="${color}" font-size="11" text-anchor="end">${esc(String(lbl))}</text>
     <text x="${pl}" y="${H - 3}" fill="#837B6A" font-size="9">${esc(opts.first || String(first))}</text>
