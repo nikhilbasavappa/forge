@@ -13,6 +13,7 @@ const DEFAULT_STATE = {
   walks: [],              // {date, min, _m}
   equipment: { dumbbells: false, suspension: false }, // bands + pull-up bar + rower assumed
   swaps: {},              // exId -> replacement exId (persistent)
+  ladders: {},            // exId -> current rung index (which variation the app has assigned)
   deloadWeek: null,       // weekStart string when a deload week is active
 };
 
@@ -29,6 +30,7 @@ function load() {
     if (!Array.isArray(s.walks)) s.walks = [];
     s.equipment = Object.assign({}, DEFAULT_STATE.equipment, s.equipment);
     if (!s.swaps || typeof s.swaps !== "object") s.swaps = {};
+    if (!s.ladders || typeof s.ladders !== "object") s.ladders = {};
     return s;
   } catch (e) { return structuredClone(DEFAULT_STATE); }
 }
@@ -91,7 +93,7 @@ function mergeStates(a, b) {
   out.measurements = mergeByKey(a.measurements, b.measurements, "date");
   out.nutrition = mergeByKey(a.nutrition, b.nutrition, "date");
   out.walks = mergeByKey(a.walks, b.walks, "date");
-  if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.programIndex = b.programIndex; out.equipment = b.equipment; out.swaps = b.swaps; out.deloadWeek = b.deloadWeek; out._m = b._m; }
+  if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.programIndex = b.programIndex; out.equipment = b.equipment; out.swaps = b.swaps; out.ladders = b.ladders; out.deloadWeek = b.deloadWeek; out._m = b._m; }
   return out;
 }
 
@@ -260,6 +262,22 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 function nextSessionKey() { return SESSION_ORDER[S.programIndex % SESSION_ORDER.length]; }
 function exFlat(sessionKey) { return SESSIONS[sessionKey].blocks.flatMap((b) => b.ex); }
 function resolveEx(exId) { return (S.swaps && S.swaps[exId]) || exId; }
+// Which rung of a progression the app has assigned (it assigns; it doesn't ask the user to choose).
+function assignedRung(exId) {
+  const ex = EXERCISES[exId];
+  if (!ex || !ex.ladder) return 0;
+  return Math.max(0, Math.min(ex.ladder.length - 1, (S.ladders && S.ladders[exId]) || 0));
+}
+function assignedVariation(exId) {
+  const ex = EXERCISES[exId];
+  return ex && ex.ladder ? ex.ladder[assignedRung(exId)] : null;
+}
+function isTimedVariation(v) { return !!(v && /\(time\)|dead hang/i.test(v)); }
+function setRung(exId, rung) {
+  const ex = EXERCISES[exId]; if (!ex || !ex.ladder) return;
+  S.ladders[exId] = Math.max(0, Math.min(ex.ladder.length - 1, rung));
+  S._m = Date.now(); save();
+}
 function isBodyweightMode() { return typeof BW_SWAPS !== "undefined" && S.swaps && S.swaps.band_curl === BW_SWAPS.band_curl && S.swaps.band_press === BW_SWAPS.band_press; }
 function dumbbellMode(ex) { return S.equipment && S.equipment.dumbbells && ex.load === "band" && /curl|press|fly|row|squat|rdl|pressdown/i.test(ex.name + " " + (ex.cat || "")); }
 
@@ -522,6 +540,33 @@ function restBeep() {
   } catch (e) {}
 }
 function stopRest() { if (restInt) clearInterval(restInt); restInt = null; const b = document.getElementById("rest-bar"); if (b) b.remove(); }
+
+/* count-up hold timer for timed moves (dead hang, plank...) — fills the seconds on stop */
+let holdInt = null, holdStart = 0;
+function stopHoldTimer() { if (holdInt) clearInterval(holdInt); holdInt = null; const b = document.getElementById("hold-bar"); if (b) b.remove(); }
+function startHold(exId, setIdx) {
+  stopHoldTimer(); stopRest();
+  holdStart = Date.now();
+  const bar = document.createElement("div");
+  bar.id = "hold-bar"; bar.className = "rest-bar hold";
+  bar.innerHTML = `<span class="rest-t" id="hold-t">0:00</span><button class="rest-x" id="hold-stop">STOP · LOG</button>`;
+  document.body.appendChild(bar);
+  const tick = () => { const t = document.getElementById("hold-t"); if (t) t.textContent = fmtClock((Date.now() - holdStart) / 1000); };
+  holdInt = setInterval(tick, 200); tick();
+  document.getElementById("hold-stop").onclick = () => {
+    const sec = Math.max(1, Math.round((Date.now() - holdStart) / 1000));
+    stopHoldTimer();
+    captureRun(exId);
+    RUN.data[exId] = RUN.data[exId] || [];
+    RUN.data[exId][setIdx] = RUN.data[exId][setIdx] || { reps: null, load: null, dist: null, unit: null, rpe: null, done: false };
+    RUN.data[exId][setIdx].reps = sec;
+    RUN.data[exId][setIdx].done = true;
+    saveRun();
+    if (navigator.vibrate) navigator.vibrate(80);
+    startRest(S.profile.restDefault || 90);
+    renderRunner();
+  };
+}
 function startRest(sec) {
   stopRest();
   restEnd = Date.now() + sec * 1000;
@@ -783,12 +828,14 @@ function renderRunner() {
   TITLE.textContent = RUN.isPrehab ? RUN.title : `Session ${RUN.key}`;
   SUB.textContent = `Exercise ${RUN.idx + 1} / ${total} · ${elapsed} min`;
 
-  // effective input type follows the SELECTED variation (e.g. a dead hang is timed even though pull-ups aren't)
-  const curVar = (existing && existing.variation) || (lastEntry(exId) && lastEntry(exId).entry.variation) || (ex.ladder && ex.ladder[0]) || null;
-  const varTimed = !!(ex.ladder && curVar && /\(time\)|dead hang/i.test(curVar));
+  // The app ASSIGNS the rung/variation — the user doesn't choose it (they can only bump it up/down).
+  const rung = ex.ladder ? assignedRung(exId) : 0;
+  const curVar = ex.ladder ? assignedVariation(exId) : null;
+  const varTimed = isTimedVariation(curVar);
   const effLoad = varTimed ? "time" : ex.load;
   const timed = effLoad === "time";
   const cardio = effLoad === "cardio";
+  const displayName = ex.ladder ? curVar.replace(/\s*\(time\)/i, "") : ex.name;
   let rows = "";
   for (let i = 0; i < pres.setsCount; i++) {
     const p = pres.perSet[i] || {};
@@ -798,29 +845,34 @@ function renderRunner() {
     const rpeVal = ev && ev.rpe ? ev.rpe : "";
     let tgt;
     if (cardio) tgt = cardioTarget(exId, ex);
-    else if (varTimed) tgt = p.last != null ? `hold — beat ${fmtDur(p.last)}` : "hold as long as you can (log seconds)";
-    else if (timed) tgt = fmtDur(p.reps);
+    else if (timed) tgt = p.last != null ? `hold — beat ${fmtDur(p.last)}` : "hold — hit ‘time it’ to run the timer";
     else tgt = `${p.reps}${p.addLoad ? " +load" : ""}`;
+    const cellHtml = timed ? `<button class="qbtn holdbtn" data-hold="${i}">⏱ time it</button>` : runnerLoadCell({ ...ex, load: effLoad }, i, cellVal);
     rows += `<div class="setrow">
       <button class="setdone ${ev && ev.done ? "on" : ""}" data-set="${i}" title="mark done + rest">${i + 1}</button>
       <input data-set="${i}" data-f="reps" inputmode="numeric" placeholder="${cardio || timed ? "sec" : "reps"}" value="${esc(repsVal)}" />
-      ${runnerLoadCell({ ...ex, load: effLoad }, i, cellVal)}
+      ${cellHtml}
       <select data-set="${i}" data-f="rpe"><option value="">RPE</option>${[6,7,8,9,10].map((n) => `<option ${rpeVal == n ? "selected" : ""}>${n}</option>`).join("")}</select>
     </div>
     <div class="settarget">target ${esc(String(tgt))}</div>`;
   }
-  let ladder = "";
+  let ladderCtl = "";
   if (ex.ladder) {
-    ladder = `<label class="fld"><span class="lt">Variation</span><select id="run-var">${ex.ladder.map((v) => `<option ${curVar === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`;
+    ladderCtl = `<div class="rungadj"><span class="lt">Assigned: rung ${rung + 1} of ${ex.ladder.length}. Too easy or hard? Adjust:</span>
+      <div class="row" style="gap:8px;margin-top:7px">
+        <button class="qbtn" id="rung-down" style="flex:1" ${rung === 0 ? "disabled" : ""}>▼ easier</button>
+        <button class="qbtn" id="rung-up" style="flex:1" ${rung >= ex.ladder.length - 1 ? "disabled" : ""}>harder ▲</button>
+      </div></div>`;
   }
   const pct = Math.round((RUN.idx / total) * 100);
   VIEW.innerHTML = `
     <div class="runbar"><div class="runbar-fill" style="width:${pct}%"></div></div>
     <div class="card">
-      <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${varTimed ? `${ex.target.sets}× hold` : targetLabel(ex)}</span></div>
-      <div class="cue">${varTimed ? esc(curVar) + " — hold the position for time, not reps. " : ""}${esc(ex.cue)}</div>
+      <div class="row"><div class="name">${esc(displayName)}</div><span class="pill">${timed ? `${pres.setsCount}× hold` : targetLabel(ex)}</span></div>
+      ${ex.ladder ? `<div class="tiny muted" style="margin:-2px 0 4px">${esc(ex.name)}${timed ? " · timed hold" : ""}</div>` : ""}
+      <div class="cue">${esc(ex.ladder && timed ? "Hold with good form as long as you can — no reps. Tap ‘time it’ to run the clock." : ex.cue)}</div>
       <div class="meta"><span class="pill ${prescribeLvl(pres)}">${esc(pres.note)}</span>${demoLink(ex)}<button class="linkbtn" id="run-swap">Swap →</button></div>
-      ${ladder}
+      ${ladderCtl}
       <div class="sets">${rows}</div>
     </div>
     <div id="swap-panel"></div>
@@ -836,13 +888,15 @@ function renderRunner() {
     if (on) startRest(S.profile.restDefault || 90);
   });
   document.querySelectorAll("[data-rest]").forEach((b) => b.onclick = () => startRest(+b.dataset.rest));
+  document.querySelectorAll("[data-hold]").forEach((b) => b.onclick = () => startHold(exId, +b.dataset.hold));
+  const rdn = document.getElementById("rung-down"); if (rdn) rdn.onclick = () => { captureRun(exId); setRung(exId, assignedRung(exId) - 1); renderRunner(); };
+  const rup = document.getElementById("rung-up"); if (rup) rup.onclick = () => { captureRun(exId); setRung(exId, assignedRung(exId) + 1); renderRunner(); };
   const prev = document.getElementById("run-prev"); if (prev) prev.onclick = () => { captureRun(exId); RUN.idx--; saveRun(); renderRunner(); };
   const cancel = document.getElementById("run-cancel"); if (cancel) cancel.onclick = () => { RUN = null; saveRun(); stopRest(); setTab("today"); };
   const next = document.getElementById("run-next"); if (next) next.onclick = () => { captureRun(exId); RUN.idx++; saveRun(); renderRunner(); };
   const fin = document.getElementById("run-finish"); if (fin) fin.onclick = () => { captureRun(exId); finishRun(); };
   document.getElementById("run-swap").onclick = () => renderSwapPanel(exId);
   document.querySelectorAll(".sets input, .sets select").forEach((el) => el.addEventListener("change", () => captureRun(exId)));
-  const rv = document.getElementById("run-var"); if (rv) rv.addEventListener("change", () => { captureRun(exId); renderRunner(); });
 }
 
 function captureRun(exId) {
@@ -860,8 +914,8 @@ function captureRun(exId) {
     };
   });
   RUN.data[exId] = sets;
-  const v = document.getElementById("run-var");
-  if (v) RUN.data[exId].variation = v.value;
+  const ex = EXERCISES[exId];
+  if (ex && ex.ladder) RUN.data[exId].variation = assignedVariation(exId);
   saveRun();
 }
 
@@ -1052,6 +1106,18 @@ function finishRun() {
     return e;
   }).filter((e) => e.sets.length);
   if (!entries.length) { toast("Log at least one set"); return; }
+  // auto-advance progression rungs when the criterion is met
+  const leveled = [];
+  entries.forEach((e) => {
+    const ex = EXERCISES[e.exId];
+    if (!ex || !ex.ladder) return;
+    const r = assignedRung(e.exId);
+    if (r >= ex.ladder.length - 1) return;
+    const top = Math.max(0, ...e.sets.map((s) => +s.reps || 0));
+    const clearedRpe = e.sets.every((s) => !s.rpe || s.rpe <= 8);
+    const advance = isTimedVariation(ex.ladder[r]) ? top >= 45 : (top >= ex.target.hi && clearedRpe);
+    if (advance) { S.ladders[e.exId] = r + 1; leveled.push(ex.ladder[r + 1].replace(/\s*\(time\)/i, "")); }
+  });
   S.workouts.push({ id: Date.now(), date: today(), sessionKey: RUN.key, entries, note: "", _m: Date.now() });
   S.programIndex = (SESSION_ORDER.indexOf(RUN.key) + 1) % SESSION_ORDER.length;
   S._m = Date.now();
@@ -1059,7 +1125,7 @@ function finishRun() {
   stopRest();
   RUN = null;
   saveRun();
-  toast("Workout saved");
+  toast(leveled.length ? `Leveled up → ${leveled[0]}` : "Workout saved");
   setTab("today");
 }
 

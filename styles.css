@@ -238,7 +238,11 @@ input::placeholder { color: var(--mut); opacity: 0.7; }
   background: var(--ink); color: var(--paper); padding: 10px 14px;
   box-shadow: 0 6px 20px rgba(0,0,0,0.25);
 }
+.rest-bar.hold { background: var(--ox); }
 .rest-bar .rest-t { font-family: var(--m); font-size: 1.4rem; font-weight: 700; min-width: 64px; text-align: center; }
+.holdbtn { padding: 10px 2px; font-size: 0.7rem; white-space: nowrap; letter-spacing: 0; }
+.rungadj { margin-top: 14px; }
+.rungadj .lt { display: block; }
 .rest-bar .rest-x {
   background: none; border: 1px solid var(--paper); color: var(--paper); border-radius: 0;
   font-family: var(--m); font-size: 0.72rem; letter-spacing: 0.08em; padding: 7px 10px; cursor: pointer;
