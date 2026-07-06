@@ -109,7 +109,7 @@ async function syncNow(opts = {}) {
     publishSummary();
     SY.lastSync = Date.now(); saveSync();
     setSyncStatus("ok");
-    if (opts.rerender) setTab(current);
+    if (opts.rerender) { if (RUN) renderRunner(); else setTab(current); }
   } catch (e) {
     setSyncStatus("err", e.message);
   } finally { syncing = false; }
@@ -659,7 +659,7 @@ function renderToday() {
         </div>
       </div>
       <div class="mast-meta">${rdPill}${readinessTags}${weekPill}</div>
-      <button class="btn good" id="start-log" style="margin-top:18px">Start &amp; log session →</button>
+      <button class="btn good" id="start-log" style="margin-top:18px">${RUN ? `Resume session — exercise ${RUN.idx + 1}/${RUN.list.length} →` : "Start &amp; log session →"}</button>
       ${ci ? "" : `<div class="tip">Check in first to adjust today's targets.</div>`}
     </div>`;
 
@@ -727,9 +727,9 @@ function renderToday() {
   html += `<button class="btn ghost" id="start-prehab" style="margin-top:20px">Daily prehab — off-day routine</button>`;
   html += `<button class="btn ghost" id="start-mobility" style="margin-top:8px">Mobility &amp; stretch — cooldown / off-day</button>`;
   VIEW.innerHTML = html;
-  document.getElementById("start-log").onclick = () => startRun(key);
-  document.getElementById("start-prehab").onclick = () => startPrehab();
-  document.getElementById("start-mobility").onclick = () => startMobility();
+  document.getElementById("start-log").onclick = () => { if (RUN) renderRunner(); else startRun(key); };
+  document.getElementById("start-prehab").onclick = () => { if (RUN) renderRunner(); else startPrehab(); };
+  document.getElementById("start-mobility").onclick = () => { if (RUN) renderRunner(); else startMobility(); };
   const dOn = document.getElementById("deload-on"); if (dOn) dOn.onclick = () => { S.deloadWeek = weekStartStr(new Date()); S._m = Date.now(); save(); toast("Deload week on"); renderToday(); };
   const dOff = document.getElementById("deload-off"); if (dOff) dOff.onclick = () => { S.deloadWeek = null; S._m = Date.now(); save(); renderToday(); };
   const rm = document.getElementById("rec-mob"); if (rm) rm.onclick = () => startMobility();
