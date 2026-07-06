@@ -1330,7 +1330,7 @@ function renderProgress() {
     ${m.length ? `<div class="card tight"><div class="small muted">History</div>${
       m.slice().reverse().slice(0, 8).map((x) => { const bf = navyBF(x); return `<div class="row small" style="padding:6px 0;border-top:1px solid var(--line)">
         <span class="muted">${prettyDate(x.date)}</span>
-        <span>${[x.weight && x.weight + "lb", x.belly && "belly " + x.belly, bf != null && bf + "%", x.armR && "R " + x.armR].filter(Boolean).join(" · ") || "–"}</span></div>`; }).join("")
+        <span>${[x.weight && x.weight + "lb", x.belly && "belly " + x.belly, bf != null && bf + "%", x.armR && "R arm " + x.armR].filter(Boolean).join(" · ") || "–"}</span></div>`; }).join("")
     }</div>` : ""}
     <div class="blk-title"><span class="dot"></span>Progress photos</div>
     <div class="card">
