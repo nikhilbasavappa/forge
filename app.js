@@ -1174,6 +1174,27 @@ function prsSince(days) {
   return n;
 }
 function weeksTraining() { return new Set(S.workouts.map((w) => weekStartStr(new Date(w.date.replace(/-/g, "/"))))).size; }
+// U.S. Navy body-fat estimate (men, inches): needs neck + belly-at-navel + height.
+function navyBF(m) {
+  if (!m || m.neck == null || m.belly == null) return null;
+  const h = S.profile.heightIn;
+  if (!h || +m.belly <= +m.neck) return null;
+  return +(86.010 * Math.log10(+m.belly - +m.neck) - 70.041 * Math.log10(h) + 36.76).toFixed(1);
+}
+function bfDelta(days) {
+  const b = S.measurements.map((x) => ({ date: x.date, bf: navyBF(x) })).filter((x) => x.bf != null);
+  if (!b.length) return null;
+  const now = b[b.length - 1].bf;
+  if (days == null) return b.length > 1 ? +(now - b[0].bf).toFixed(1) : null;
+  let past = null;
+  for (let i = b.length - 1; i >= 0; i--) { if (daysAgo(b[i].date) >= days) { past = b[i].bf; break; } }
+  return past != null ? +(now - past).toFixed(1) : null;
+}
+function armSymmetry(m) {
+  if (!m || m.armL == null || m.armR == null) return null;
+  const diff = +(+m.armR - +m.armL).toFixed(2);
+  return { l: m.armL, r: m.armR, diff, bigger: diff > 0 ? "R" : diff < 0 ? "L" : "even" };
+}
 function glanceItem(label, delta, unit, lowerGood) {
   if (delta == null) return `<div class="gi"><div class="gi-v muted">–</div><div class="gi-l">${label}</div></div>`;
   const arrow = delta > 0 ? "↑" : delta < 0 ? "↓" : "→";
@@ -1192,6 +1213,9 @@ function renderProgress() {
   const wPoints = m.filter((x) => x.weight != null).map((x, i) => ({ x: i, y: +x.weight }));
   const ePoints = S.checkins.filter((c) => c.energy).map((c, i) => ({ x: i, y: c.energy }));
   const rhrPoints = m.filter((x) => x.rhr != null).map((x, i) => ({ x: i, y: +x.rhr }));
+  const bfPoints = []; m.forEach((x) => { const v = navyBF(x); if (v != null) bfPoints.push({ x: bfPoints.length, y: v }); });
+  const latestBF = navyBF(lastM);
+  const sym = armSymmetry(lastM);
 
   // a couple of key lift trends (top set reps)
   function liftPoints(exId) {
@@ -1214,16 +1238,16 @@ function renderProgress() {
       <div class="lt">Last 7 days</div>
       <div class="glance">
         ${glanceItem("Weight", trendVal("weight", 7), "lb", true)}
-        ${glanceItem("Waist", trendVal("waist", 7), "in", true)}
+        ${glanceItem("Belly", trendVal("belly", 7), "in", true)}
         ${glanceStat(S.workouts.filter((w) => daysAgo(w.date) <= 7).length, "sessions")}
         ${glanceStat(prsSince(7), "PRs")}
       </div>
       <div class="lt" style="margin-top:16px">Since start</div>
       <div class="glance">
         ${glanceItem("Weight", trendVal("weight", null), "lb", true)}
-        ${glanceItem("Waist", trendVal("waist", null), "in", true)}
+        ${glanceItem("Belly", trendVal("belly", null), "in", true)}
+        ${glanceItem("Body fat", bfDelta(null), "%", true)}
         ${glanceStat(S.workouts.length, "workouts")}
-        ${glanceStat(weeksTraining(), "weeks")}
       </div>
     </div>
     <div class="blk-title"><span class="dot"></span>Adherence</div>
@@ -1257,28 +1281,54 @@ function renderProgress() {
         <span>${lastM && lastM.bpSys ? `<span class="pill">BP ${esc(lastM.bpSys)}/${esc(lastM.bpDia ?? "?")}</span> ` : ""}${lastM && lastM.readiness ? `<span class="pill">Ready ${esc(lastM.readiness)}</span>` : ""}</span></div>
       ${lineChart(rhrPoints, "#16140F", { fmt: (v) => v + " bpm" })}
     </div>
+    <div class="blk-title"><span class="dot"></span>Body composition</div>
+    <div class="card">
+      <div class="row"><div class="name">Est. body fat</div>${latestBF != null ? `<span class="pill">${latestBF}%</span>` : `<span class="pill">log neck + belly</span>`}</div>
+      ${bfPoints.length ? lineChart(bfPoints, "#8A2B22", { fmt: (v) => v + "%" }) : `<div class="chart-empty">Log neck + belly (navel) to estimate body fat.</div>`}
+      <div class="row small" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"><span class="muted">Belly (navel)</span><span>${lastM?.belly != null ? lastM.belly + " in" : "—"}</span></div>
+      <div class="row small" style="padding:8px 0"><span class="muted">Arms L / R</span><span>${sym ? `${sym.l} / ${sym.r} in${sym.diff !== 0 ? ` · ${sym.bigger}+${Math.abs(sym.diff)}` : " · even"}` : "—"}</span></div>
+    </div>
+
     <div class="blk-title"><span class="dot"></span>Log measurements</div>
     <div class="card">
-      <div class="tiny muted">Weekly. Tape tracks recomposition better than scale weight.</div>
+      <div class="tiny muted">Tape at the same spot, relaxed. Weekly. Body-fat estimate needs neck + belly.</div>
+      <div class="lt" style="margin-top:14px">Body</div>
       <div class="grid2">
         <label class="fld"><span class="lt">Bodyweight (lb)</span><input id="m-weight" inputmode="decimal" placeholder="${esc(lastM?.weight ?? S.profile.startWeight)}"/></label>
-        <label class="fld"><span class="lt">Waist (in)</span><input id="m-waist" inputmode="decimal" placeholder="${esc(lastM?.waist ?? "")}"/></label>
+        <label class="fld"><span class="lt">Neck (in)</span><input id="m-neck" inputmode="decimal" placeholder="${esc(lastM?.neck ?? "")}"/></label>
         <label class="fld"><span class="lt">Chest (in)</span><input id="m-chest" inputmode="decimal" placeholder="${esc(lastM?.chest ?? "")}"/></label>
-        <label class="fld"><span class="lt">Arm (in)</span><input id="m-arm" inputmode="decimal" placeholder="${esc(lastM?.arm ?? "")}"/></label>
+        <label class="fld"><span class="lt">Shoulders (in)</span><input id="m-shoulders" inputmode="decimal" placeholder="${esc(lastM?.shoulders ?? "")}"/></label>
       </div>
-      <div class="lt" style="margin-top:18px">Health (optional)</div>
+      <div class="lt" style="margin-top:16px">Torso</div>
+      <div class="grid2">
+        <label class="fld"><span class="lt">Waist — pants (in)</span><input id="m-waist" inputmode="decimal" placeholder="${esc(lastM?.waist ?? "")}"/></label>
+        <label class="fld"><span class="lt">Belly — navel (in)</span><input id="m-belly" inputmode="decimal" placeholder="${esc(lastM?.belly ?? "")}"/></label>
+        <label class="fld"><span class="lt">Hips (in)</span><input id="m-hips" inputmode="decimal" placeholder="${esc(lastM?.hips ?? "")}"/></label>
+      </div>
+      <div class="lt" style="margin-top:16px">Arms</div>
+      <div class="grid2">
+        <label class="fld"><span class="lt">Left arm (in)</span><input id="m-armL" inputmode="decimal" placeholder="${esc(lastM?.armL ?? "")}"/></label>
+        <label class="fld"><span class="lt">Right arm (in)</span><input id="m-armR" inputmode="decimal" placeholder="${esc(lastM?.armR ?? "")}"/></label>
+      </div>
+      <div class="lt" style="margin-top:16px">Legs</div>
+      <div class="grid2">
+        <label class="fld"><span class="lt">Left thigh (in)</span><input id="m-thighL" inputmode="decimal" placeholder="${esc(lastM?.thighL ?? "")}"/></label>
+        <label class="fld"><span class="lt">Right thigh (in)</span><input id="m-thighR" inputmode="decimal" placeholder="${esc(lastM?.thighR ?? "")}"/></label>
+        <label class="fld"><span class="lt">Left calf (in)</span><input id="m-calfL" inputmode="decimal" placeholder="${esc(lastM?.calfL ?? "")}"/></label>
+        <label class="fld"><span class="lt">Right calf (in)</span><input id="m-calfR" inputmode="decimal" placeholder="${esc(lastM?.calfR ?? "")}"/></label>
+      </div>
+      <div class="lt" style="margin-top:16px">Health (optional)</div>
       <div class="grid2">
         <label class="fld"><span class="lt">Resting HR (bpm)</span><input id="m-rhr" inputmode="numeric" placeholder="${esc(lastM?.rhr ?? "")}"/></label>
-        <label class="fld"><span class="lt">Readiness (0–100)</span><input id="m-readiness" inputmode="numeric" placeholder="${esc(lastM?.readiness ?? "")}"/></label>
         <label class="fld"><span class="lt">BP systolic</span><input id="m-bps" inputmode="numeric" placeholder="${esc(lastM?.bpSys ?? "")}"/></label>
         <label class="fld"><span class="lt">BP diastolic</span><input id="m-bpd" inputmode="numeric" placeholder="${esc(lastM?.bpDia ?? "")}"/></label>
       </div>
-      <button class="btn" id="save-m" style="margin-top:14px">Save measurements</button>
+      <button class="btn" id="save-m" style="margin-top:16px">Save measurements</button>
     </div>
     ${m.length ? `<div class="card tight"><div class="small muted">History</div>${
-      m.slice().reverse().slice(0, 8).map((x) => `<div class="row small" style="padding:6px 0;border-top:1px solid var(--line)">
+      m.slice().reverse().slice(0, 8).map((x) => { const bf = navyBF(x); return `<div class="row small" style="padding:6px 0;border-top:1px solid var(--line)">
         <span class="muted">${prettyDate(x.date)}</span>
-        <span>${[x.weight && x.weight + "lb", x.waist && "w" + x.waist, x.chest && "c" + x.chest, x.arm && "a" + x.arm].filter(Boolean).join(" · ")}</span></div>`).join("")
+        <span>${[x.weight && x.weight + "lb", x.belly && "belly " + x.belly, bf != null && bf + "%", x.armR && "R " + x.armR].filter(Boolean).join(" · ") || "–"}</span></div>`; }).join("")
     }</div>` : ""}
     <div class="blk-title"><span class="dot"></span>Progress photos</div>
     <div class="card">
@@ -1297,8 +1347,11 @@ function renderProgress() {
   renderPhotos();
 
   document.getElementById("save-m").onclick = () => {
-    const g = (id) => { const v = document.getElementById(id).value.trim(); return v === "" ? null : Number(v); };
-    const rec = { date: today(), weight: g("m-weight"), waist: g("m-waist"), chest: g("m-chest"), arm: g("m-arm"), rhr: g("m-rhr"), readiness: g("m-readiness"), bpSys: g("m-bps"), bpDia: g("m-bpd"), _m: Date.now() };
+    const g = (id) => { const el = document.getElementById(id); const v = el ? el.value.trim() : ""; return v === "" ? null : Number(v); };
+    const rec = { date: today(), weight: g("m-weight"), neck: g("m-neck"), chest: g("m-chest"), shoulders: g("m-shoulders"),
+      waist: g("m-waist"), belly: g("m-belly"), hips: g("m-hips"), armL: g("m-armL"), armR: g("m-armR"),
+      thighL: g("m-thighL"), thighR: g("m-thighR"), calfL: g("m-calfL"), calfR: g("m-calfR"),
+      rhr: g("m-rhr"), bpSys: g("m-bps"), bpDia: g("m-bpd"), _m: Date.now() };
     if (Object.entries(rec).filter(([k]) => k !== "date" && k !== "_m").every(([, v]) => v == null)) { toast("Enter at least one"); return; }
     const i = S.measurements.findIndex((x) => x.date === today());
     if (i >= 0) { for (const [k, v] of Object.entries(rec)) if (v != null) S.measurements[i][k] = v; S.measurements[i]._m = Date.now(); }
@@ -1337,7 +1390,7 @@ function buildExport() {
   const lastM = S.measurements[S.measurements.length - 1];
   const firstM = S.measurements[0];
   md += `**Profile:** ${S.profile.heightIn}in, start ${S.profile.startWeight}lb. `;
-  if (lastM) md += `Latest: ${[lastM.weight && lastM.weight + "lb", lastM.waist && "waist " + lastM.waist, lastM.chest && "chest " + lastM.chest, lastM.arm && "arm " + lastM.arm].filter(Boolean).join(", ")}`;
+  if (lastM) { const bf = navyBF(lastM); md += `Latest: ${[lastM.weight && lastM.weight + "lb", bf != null && "~" + bf + "% bf", lastM.belly && "belly " + lastM.belly, lastM.waist && "waist(pants) " + lastM.waist, lastM.chest && "chest " + lastM.chest, (lastM.armL || lastM.armR) && `arms ${lastM.armL ?? "?"}/${lastM.armR ?? "?"}`, (lastM.thighL || lastM.thighR) && `thighs ${lastM.thighL ?? "?"}/${lastM.thighR ?? "?"}`, lastM.hips && "hips " + lastM.hips].filter(Boolean).join(", ")}`; }
   if (firstM && lastM && firstM !== lastM && firstM.weight && lastM.weight) md += ` (Δ ${(lastM.weight - firstM.weight).toFixed(1)}lb from first measure)`;
   md += `\n\n## Check-ins (last week)\n`;
   if (!recentC.length) md += `_none logged_\n`;
