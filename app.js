@@ -777,14 +777,18 @@ function renderRunner() {
   const total = RUN.list.length;
   const exId = RUN.list[RUN.idx];
   const ex = EXERCISES[exId];
-  const timed = ex.load === "time";
   const pres = prescribe(exId);
   const existing = RUN.data[exId];
   const elapsed = Math.round((Date.now() - RUN.startTs) / 60000);
   TITLE.textContent = RUN.isPrehab ? RUN.title : `Session ${RUN.key}`;
   SUB.textContent = `Exercise ${RUN.idx + 1} / ${total} · ${elapsed} min`;
 
-  const cardio = ex.load === "cardio";
+  // effective input type follows the SELECTED variation (e.g. a dead hang is timed even though pull-ups aren't)
+  const curVar = (existing && existing.variation) || (lastEntry(exId) && lastEntry(exId).entry.variation) || (ex.ladder && ex.ladder[0]) || null;
+  const varTimed = !!(ex.ladder && curVar && /\(time\)|dead hang/i.test(curVar));
+  const effLoad = varTimed ? "time" : ex.load;
+  const timed = effLoad === "time";
+  const cardio = effLoad === "cardio";
   let rows = "";
   for (let i = 0; i < pres.setsCount; i++) {
     const p = pres.perSet[i] || {};
@@ -792,26 +796,29 @@ function renderRunner() {
     const repsVal = ev && ev.reps != null ? ev.reps : (cardio ? p.reps : (p.last ?? ""));
     const cellVal = cardio ? (ev && ev.dist != null ? ev.dist : "") : (ev && ev.load != null ? ev.load : (p.load ?? ""));
     const rpeVal = ev && ev.rpe ? ev.rpe : "";
-    const tgt = cardio ? cardioTarget(exId, ex) : timed ? fmtDur(p.reps) : `${p.reps}${p.addLoad ? " +load" : ""}`;
+    let tgt;
+    if (cardio) tgt = cardioTarget(exId, ex);
+    else if (varTimed) tgt = p.last != null ? `hold — beat ${fmtDur(p.last)}` : "hold as long as you can (log seconds)";
+    else if (timed) tgt = fmtDur(p.reps);
+    else tgt = `${p.reps}${p.addLoad ? " +load" : ""}`;
     rows += `<div class="setrow">
       <button class="setdone ${ev && ev.done ? "on" : ""}" data-set="${i}" title="mark done + rest">${i + 1}</button>
       <input data-set="${i}" data-f="reps" inputmode="numeric" placeholder="${cardio || timed ? "sec" : "reps"}" value="${esc(repsVal)}" />
-      ${runnerLoadCell(ex, i, cellVal)}
+      ${runnerLoadCell({ ...ex, load: effLoad }, i, cellVal)}
       <select data-set="${i}" data-f="rpe"><option value="">RPE</option>${[6,7,8,9,10].map((n) => `<option ${rpeVal == n ? "selected" : ""}>${n}</option>`).join("")}</select>
     </div>
     <div class="settarget">target ${esc(String(tgt))}</div>`;
   }
   let ladder = "";
   if (ex.ladder) {
-    const cur = (existing && existing.variation) || (lastEntry(exId) && lastEntry(exId).entry.variation);
-    ladder = `<label class="fld"><span class="lt">Variation</span><select id="run-var">${ex.ladder.map((v) => `<option ${cur === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`;
+    ladder = `<label class="fld"><span class="lt">Variation</span><select id="run-var">${ex.ladder.map((v) => `<option ${curVar === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`;
   }
   const pct = Math.round((RUN.idx / total) * 100);
   VIEW.innerHTML = `
     <div class="runbar"><div class="runbar-fill" style="width:${pct}%"></div></div>
     <div class="card">
-      <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${targetLabel(ex)}</span></div>
-      <div class="cue">${esc(ex.cue)}</div>
+      <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${varTimed ? `${ex.target.sets}× hold` : targetLabel(ex)}</span></div>
+      <div class="cue">${varTimed ? esc(curVar) + " — hold the position for time, not reps. " : ""}${esc(ex.cue)}</div>
       <div class="meta"><span class="pill ${prescribeLvl(pres)}">${esc(pres.note)}</span>${demoLink(ex)}<button class="linkbtn" id="run-swap">Swap →</button></div>
       ${ladder}
       <div class="sets">${rows}</div>
@@ -834,7 +841,8 @@ function renderRunner() {
   const next = document.getElementById("run-next"); if (next) next.onclick = () => { captureRun(exId); RUN.idx++; saveRun(); renderRunner(); };
   const fin = document.getElementById("run-finish"); if (fin) fin.onclick = () => { captureRun(exId); finishRun(); };
   document.getElementById("run-swap").onclick = () => renderSwapPanel(exId);
-  document.querySelectorAll(".sets input, .sets select, #run-var").forEach((el) => el.addEventListener("change", () => captureRun(exId)));
+  document.querySelectorAll(".sets input, .sets select").forEach((el) => el.addEventListener("change", () => captureRun(exId)));
+  const rv = document.getElementById("run-var"); if (rv) rv.addEventListener("change", () => { captureRun(exId); renderRunner(); });
 }
 
 function captureRun(exId) {
