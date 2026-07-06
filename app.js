@@ -691,20 +691,6 @@ function renderToday() {
       </div>
     </div>`;
 
-  // walk / NEAT logger
-  const wkMin = walkToday(), wkTgt = S.profile.walkTarget || 0;
-  const wkPct = wkTgt ? Math.min(100, Math.round((wkMin / wkTgt) * 100)) : 0;
-  html += `
-    <div class="blk-title"><span class="dot"></span>Walk today</div>
-    <div class="card">
-      <div class="row"><span class="bignum">${wkMin}<span class="unit"> / ${wkTgt} min</span></span>
-        <span class="pill ${wkMin >= wkTgt && wkTgt ? "good" : "acc"}">${wkPct}%</span></div>
-      <div class="pbar"><div class="pbar-fill" style="width:${wkPct}%"></div></div>
-      <div class="qadd">
-        ${[10, 20, 30].map((m) => `<button class="qbtn" data-walk="${m}">+${m}</button>`).join("")}
-      </div>
-    </div>`;
-
   for (const blk of sess.blocks) {
     html += `<div class="blk-title"><span class="dot"></span>${esc(blk.title)}</div><div class="card">`;
     for (const rawId of blk.ex) {
@@ -722,6 +708,22 @@ function renderToday() {
     }
     html += `</div>`;
   }
+
+  // walk / NEAT logger — after the session, since that's usually when it happens
+  const wkMin = walkToday(), wkTgt = S.profile.walkTarget || 0;
+  const wkPct = wkTgt ? Math.min(100, Math.round((wkMin / wkTgt) * 100)) : 0;
+  html += `
+    <div class="blk-title"><span class="dot"></span>Walk today</div>
+    <div class="card">
+      <div class="row"><span class="bignum">${wkMin}<span class="unit"> / ${wkTgt} min</span></span>
+        <span class="pill ${wkMin >= wkTgt && wkTgt ? "good" : "acc"}">${wkPct}%</span></div>
+      <div class="tiny muted" style="margin-top:4px">Anytime today — often easiest right after training.</div>
+      <div class="pbar"><div class="pbar-fill" style="width:${wkPct}%"></div></div>
+      <div class="qadd">
+        ${[10, 20, 30].map((m) => `<button class="qbtn" data-walk="${m}">+${m}</button>`).join("")}
+      </div>
+    </div>`;
+
   html += `<button class="btn ghost" id="start-prehab" style="margin-top:20px">Daily prehab — off-day routine</button>`;
   html += `<button class="btn ghost" id="start-mobility" style="margin-top:8px">Mobility &amp; stretch — cooldown / off-day</button>`;
   VIEW.innerHTML = html;
