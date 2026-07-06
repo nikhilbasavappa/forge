@@ -161,9 +161,9 @@ const EXERCISES = {
 
   // ---- Conditioning ----
   row_steady: {
-    name: "Rower — Steady", cat: "cond", load: "time", target: { sets: 1, sec: 300 },
-    cue: "Easy-moderate pace. Legs, then hips, then arms; reverse the order on the return.",
-    q: "rowing machine technique"
+    name: "Rower — Steady", cat: "cond", load: "cardio", target: { sets: 1, sec: 300 },
+    cue: "Easy-moderate pace for the set time. Log your METERS — beating your distance in the same time is how you get fitter. Legs → hips → arms; reverse on the return.",
+    q: "rowing machine technique pace"
   },
   row_intervals: {
     name: "Rower — Intervals", cat: "cond", load: "time", target: { sets: 6, sec: 30 },

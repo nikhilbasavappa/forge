@@ -289,12 +289,12 @@ function exHistory(exId) {
   return out;
 }
 function momentum(exId, ex) {
-  if (ex.load === "time") return false;
+  if (ex.load === "time" || ex.load === "cardio") return false;
   const h = exHistory(exId); if (h.length < 2) return false;
   return h.slice(-2).every((s) => s.top >= ex.target.hi && (!s.rpe || s.rpe <= 8));
 }
 function isStalled(exId, ex) {
-  if (ex.load === "time") return false;
+  if (ex.load === "time" || ex.load === "cardio") return false;
   const h = exHistory(exId); if (h.length < 3) return false;
   const w = h.slice(-3);
   return Math.max(...w.map((s) => s.top)) <= w[0].top; // no new high across 3 sessions
@@ -314,9 +314,27 @@ function readiness() {
   return { score: s, band };
 }
 
+function pace500(distM, timeSec) {
+  if (!distM || !timeSec) return null;
+  const s = Math.round((timeSec / distM) * 500);
+  return `${Math.floor(s / 60)}:${pad(s % 60)}/500m`;
+}
+function lastCardio(exId) {
+  const l = lastEntry(exId); if (!l) return null;
+  const set = l.entry.sets.find((s) => s.dist != null); return set ? { dist: +set.dist, time: +set.reps || null } : null;
+}
+function cardioTarget(exId, ex) {
+  const lc = lastCardio(exId);
+  if (lc) { const p = pace500(lc.dist, lc.time || ex.target.sec); return `beat ${lc.dist}m in ${fmtDur(ex.target.sec)}${p ? " · " + p : ""}`; }
+  return `${fmtDur(ex.target.sec)} — log your meters`;
+}
+
 // Auto-progression: per-set targets scaled by readiness (both directions) + momentum.
 function prescribe(exId) {
   const ex = EXERCISES[exId];
+  if (ex.load === "cardio") {
+    return { setsCount: ex.target.sets, perSet: Array.from({ length: ex.target.sets }, () => ({ reps: ex.target.sec })), note: lastCardio(exId) ? "Beat last distance in the same time" : "Steady pace — log your meters" };
+  }
   const last = lastEntry(exId);
   const deload = deloadActive();
   const rd = readiness();
@@ -583,6 +601,7 @@ document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () 
 
 /* ---------- target label ---------- */
 function targetLabel(ex) {
+  if (ex.load === "cardio") return `${fmtDur(ex.target.sec)} · dist`;
   if (ex.load === "time") return `${ex.target.sets}×${fmtDur(ex.target.sec)}`;
   return `${ex.target.sets}×${ex.target.lo}–${ex.target.hi}${ex.side ? "/side" : ""}`;
 }
@@ -594,6 +613,11 @@ function demoLink(ex) {
 function lastLabel(exId) {
   const l = lastEntry(exId);
   if (!l) return null;
+  const cardioSet = l.entry.sets.find((s) => s.dist != null);
+  if (cardioSet) {
+    const p = pace500(+cardioSet.dist, +cardioSet.reps);
+    return `Last (${daysAgo(l.date)}d): ${cardioSet.dist}m${cardioSet.reps ? " in " + fmtDur(+cardioSet.reps) : ""}${p ? " · " + p : ""}`;
+  }
   const parts = l.entry.sets.filter((s) => s.reps != null).map((s) => {
     const u = s.load ? ` @ ${esc(String(s.load))}${s.unit ? esc(s.unit) : ""}` : "";
     return `${s.reps}${u}`;
@@ -735,6 +759,7 @@ function startMobility() {
 }
 function prescribeLvl(p) { return /add load|cruising/i.test(p.note) ? "good" : /readiness|deload/i.test(p.note) ? "warn" : "acc"; }
 function runnerLoadCell(ex, i, val) {
+  if (ex.load === "cardio") return `<input data-set="${i}" data-f="dist" inputmode="numeric" placeholder="meters" value="${esc(val ?? "")}" />`;
   if (ex.load === "reps" || !ex.load) return `<div class="tiny muted center">BW</div>`;
   if (ex.load === "time") return `<input data-set="${i}" data-f="load" placeholder="—" value="${esc(val ?? "")}" />`;
   const db = dumbbellMode(ex);
@@ -755,18 +780,19 @@ function renderRunner() {
   TITLE.textContent = RUN.isPrehab ? RUN.title : `Session ${RUN.key}`;
   SUB.textContent = `Exercise ${RUN.idx + 1} / ${total} · ${elapsed} min`;
 
+  const cardio = ex.load === "cardio";
   let rows = "";
   for (let i = 0; i < pres.setsCount; i++) {
     const p = pres.perSet[i] || {};
     const ev = existing && existing[i];
-    const repsVal = ev && ev.reps != null ? ev.reps : (p.last ?? "");
-    const loadVal = ev && ev.load != null ? ev.load : (p.load ?? "");
+    const repsVal = ev && ev.reps != null ? ev.reps : (cardio ? p.reps : (p.last ?? ""));
+    const cellVal = cardio ? (ev && ev.dist != null ? ev.dist : "") : (ev && ev.load != null ? ev.load : (p.load ?? ""));
     const rpeVal = ev && ev.rpe ? ev.rpe : "";
-    const tgt = timed ? fmtDur(p.reps) : `${p.reps}${p.addLoad ? " +load" : ""}`;
+    const tgt = cardio ? cardioTarget(exId, ex) : timed ? fmtDur(p.reps) : `${p.reps}${p.addLoad ? " +load" : ""}`;
     rows += `<div class="setrow">
-      <div class="idx">${i + 1}</div>
-      <input data-set="${i}" data-f="reps" inputmode="numeric" placeholder="${timed ? "sec" : "reps"}" value="${esc(repsVal)}" />
-      ${runnerLoadCell(ex, i, loadVal)}
+      <button class="setdone ${ev && ev.done ? "on" : ""}" data-set="${i}" title="mark done + rest">${i + 1}</button>
+      <input data-set="${i}" data-f="reps" inputmode="numeric" placeholder="${cardio || timed ? "sec" : "reps"}" value="${esc(repsVal)}" />
+      ${runnerLoadCell(ex, i, cellVal)}
       <select data-set="${i}" data-f="rpe"><option value="">RPE</option>${[6,7,8,9,10].map((n) => `<option ${rpeVal == n ? "selected" : ""}>${n}</option>`).join("")}</select>
     </div>
     <div class="settarget">target ${esc(String(tgt))}</div>`;
@@ -793,6 +819,11 @@ function renderRunner() {
       ${RUN.idx < total - 1 ? `<button class="btn" id="run-next">Next →</button>` : `<button class="btn good" id="run-finish">Finish &amp; save</button>`}
     </div>`;
   window.scrollTo(0, 0);
+  document.querySelectorAll(".setdone").forEach((b) => b.onclick = () => {
+    const on = b.classList.toggle("on");
+    captureRun(exId);
+    if (on) startRest(S.profile.restDefault || 90);
+  });
   document.querySelectorAll("[data-rest]").forEach((b) => b.onclick = () => startRest(+b.dataset.rest));
   const prev = document.getElementById("run-prev"); if (prev) prev.onclick = () => { captureRun(exId); RUN.idx--; renderRunner(); };
   const cancel = document.getElementById("run-cancel"); if (cancel) cancel.onclick = () => { RUN = null; stopRest(); setTab("today"); };
@@ -804,13 +835,15 @@ function renderRunner() {
 function captureRun(exId) {
   const sets = [];
   document.querySelectorAll(".sets .setrow").forEach((row) => {
-    const reps = row.querySelector('[data-f="reps"]'), load = row.querySelector('[data-f="load"]'), rpe = row.querySelector('[data-f="rpe"]');
+    const reps = row.querySelector('[data-f="reps"]'), load = row.querySelector('[data-f="load"]'), dist = row.querySelector('[data-f="dist"]'), rpe = row.querySelector('[data-f="rpe"]');
     const i = +reps.dataset.set;
     sets[i] = {
       reps: reps.value.trim() === "" ? null : Number(reps.value),
       load: load && load.value != null && load.value.trim() !== "" ? load.value.trim() : null,
+      dist: dist && dist.value.trim() !== "" ? Number(dist.value) : null,
       unit: null,
       rpe: rpe.value === "" ? null : Number(rpe.value),
+      done: row.querySelector(".setdone")?.classList.contains("on") || false,
     };
   });
   RUN.data[exId] = sets;
@@ -997,7 +1030,8 @@ function finishRun() {
   if (RUN.isPrehab) { const t = RUN.title || "Prehab"; stopRest(); RUN = null; toast(t + " done"); setTab("today"); return; }
   const entries = Object.entries(RUN.data).map(([exId, sets]) => {
     const variation = sets.variation;
-    const clean = sets.filter((s) => s && (s.reps != null || s.load != null));
+    const clean = sets.filter((s) => s && (s.reps != null || s.load != null || s.dist != null))
+      .map((s) => { const o = { reps: s.reps, load: s.load, unit: s.unit, rpe: s.rpe }; if (s.dist != null) o.dist = s.dist; return o; });
     const e = { exId, sets: clean };
     if (variation) e.variation = variation;
     return e;
@@ -1120,6 +1154,34 @@ function lineChart(points, color, opts = {}) {
   </svg>`;
 }
 
+/* ---------- progress-at-a-glance ---------- */
+function trendVal(field, days) {
+  const m = S.measurements.filter((x) => x[field] != null);
+  if (!m.length) return null;
+  const now = +m[m.length - 1][field];
+  if (days == null) return m.length > 1 ? +(now - (+m[0][field])).toFixed(1) : null;
+  let past = null;
+  for (let i = m.length - 1; i >= 0; i--) { if (daysAgo(m[i].date) >= days) { past = +m[i][field]; break; } }
+  return past != null ? +(now - past).toFixed(1) : null;
+}
+function prsSince(days) {
+  let n = 0;
+  new Set(S.workouts.filter((w) => daysAgo(w.date) <= days).flatMap((w) => w.entries.map((e) => e.exId))).forEach((exId) => {
+    let before = 0, recent = 0;
+    S.workouts.forEach((w) => { const e = w.entries.find((x) => x.exId === exId); if (!e) return; const top = Math.max(0, ...e.sets.map((s) => +s.reps || 0)); if (daysAgo(w.date) <= days) recent = Math.max(recent, top); else before = Math.max(before, top); });
+    if (recent > before && before > 0) n++;
+  });
+  return n;
+}
+function weeksTraining() { return new Set(S.workouts.map((w) => weekStartStr(new Date(w.date.replace(/-/g, "/"))))).size; }
+function glanceItem(label, delta, unit, lowerGood) {
+  if (delta == null) return `<div class="gi"><div class="gi-v muted">–</div><div class="gi-l">${label}</div></div>`;
+  const arrow = delta > 0 ? "↑" : delta < 0 ? "↓" : "→";
+  const cls = delta === 0 ? "" : (lowerGood ? delta < 0 : delta > 0) ? "gi-good" : "gi-bad";
+  return `<div class="gi"><div class="gi-v ${cls}">${arrow}${Math.abs(delta)}${unit}</div><div class="gi-l">${label}</div></div>`;
+}
+function glanceStat(val, label) { return `<div class="gi"><div class="gi-v">${val}</div><div class="gi-l">${label}</div></div>`; }
+
 /* ---------- PROGRESS ---------- */
 function renderProgress() {
   TITLE.textContent = "Progress";
@@ -1147,6 +1209,23 @@ function renderProgress() {
   const np = S.nutrition.filter((n) => n.protein != null).slice(-14).map((n) => ({ label: n.date.slice(5).replace("-", "/"), v: +n.protein, hi: (+n.protein) >= (S.profile.proteinTarget || 0) }));
 
   VIEW.innerHTML = `
+    <div class="blk-title"><span class="dot"></span>At a glance</div>
+    <div class="card">
+      <div class="lt">Last 7 days</div>
+      <div class="glance">
+        ${glanceItem("Weight", trendVal("weight", 7), "lb", true)}
+        ${glanceItem("Waist", trendVal("waist", 7), "in", true)}
+        ${glanceStat(S.workouts.filter((w) => daysAgo(w.date) <= 7).length, "sessions")}
+        ${glanceStat(prsSince(7), "PRs")}
+      </div>
+      <div class="lt" style="margin-top:16px">Since start</div>
+      <div class="glance">
+        ${glanceItem("Weight", trendVal("weight", null), "lb", true)}
+        ${glanceItem("Waist", trendVal("waist", null), "in", true)}
+        ${glanceStat(S.workouts.length, "workouts")}
+        ${glanceStat(weeksTraining(), "weeks")}
+      </div>
+    </div>
     <div class="blk-title"><span class="dot"></span>Adherence</div>
     <div class="card">
       <div class="row"><span class="bignum">${sw}<span class="unit"> / ${wt} this week</span></span>
