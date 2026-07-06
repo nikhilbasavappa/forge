@@ -745,19 +745,21 @@ function renderToday() {
 }
 
 /* ---------- GUIDED WORKOUT RUNNER ---------- */
-let RUN = null; // { key, list:[exId], idx, startTs, data:{exId:sets[]} }
+const RUN_KEY = "forge.run";
+let RUN = (() => { try { return JSON.parse(localStorage.getItem(RUN_KEY)) || null; } catch { return null; } })();
+function saveRun() { if (RUN) localStorage.setItem(RUN_KEY, JSON.stringify(RUN)); else localStorage.removeItem(RUN_KEY); }
 
 function startRun(key) {
   RUN = { key, list: exFlat(key).map(resolveEx), idx: 0, startTs: Date.now(), data: {} };
-  renderRunner();
+  saveRun(); renderRunner();
 }
 function startPrehab() {
   RUN = { key: "Prehab", list: PREHAB_ROUTINE.slice(), idx: 0, startTs: Date.now(), data: {}, isPrehab: true, title: "Daily prehab" };
-  renderRunner();
+  saveRun(); renderRunner();
 }
 function startMobility() {
   RUN = { key: "Mobility", list: MOBILITY_ROUTINE.slice(), idx: 0, startTs: Date.now(), data: {}, isPrehab: true, title: "Mobility & stretch" };
-  renderRunner();
+  saveRun(); renderRunner();
 }
 function prescribeLvl(p) { return /add load|cruising/i.test(p.note) ? "good" : /readiness|deload/i.test(p.note) ? "warn" : "acc"; }
 function runnerLoadCell(ex, i, val) {
@@ -827,11 +829,12 @@ function renderRunner() {
     if (on) startRest(S.profile.restDefault || 90);
   });
   document.querySelectorAll("[data-rest]").forEach((b) => b.onclick = () => startRest(+b.dataset.rest));
-  const prev = document.getElementById("run-prev"); if (prev) prev.onclick = () => { captureRun(exId); RUN.idx--; renderRunner(); };
-  const cancel = document.getElementById("run-cancel"); if (cancel) cancel.onclick = () => { RUN = null; stopRest(); setTab("today"); };
-  const next = document.getElementById("run-next"); if (next) next.onclick = () => { captureRun(exId); RUN.idx++; renderRunner(); };
+  const prev = document.getElementById("run-prev"); if (prev) prev.onclick = () => { captureRun(exId); RUN.idx--; saveRun(); renderRunner(); };
+  const cancel = document.getElementById("run-cancel"); if (cancel) cancel.onclick = () => { RUN = null; saveRun(); stopRest(); setTab("today"); };
+  const next = document.getElementById("run-next"); if (next) next.onclick = () => { captureRun(exId); RUN.idx++; saveRun(); renderRunner(); };
   const fin = document.getElementById("run-finish"); if (fin) fin.onclick = () => { captureRun(exId); finishRun(); };
   document.getElementById("run-swap").onclick = () => renderSwapPanel(exId);
+  document.querySelectorAll(".sets input, .sets select, #run-var").forEach((el) => el.addEventListener("change", () => captureRun(exId)));
 }
 
 function captureRun(exId) {
@@ -851,6 +854,7 @@ function captureRun(exId) {
   RUN.data[exId] = sets;
   const v = document.getElementById("run-var");
   if (v) RUN.data[exId].variation = v.value;
+  saveRun();
 }
 
 function renderSwapPanel(exId) {
@@ -865,6 +869,7 @@ function renderSwapPanel(exId) {
     const origId = exFlat(RUN.key).find((o) => resolveEx(o) === cur) || cur;
     S.swaps[origId] = b.dataset.swap; S._m = Date.now(); save();
     RUN.list[RUN.idx] = b.dataset.swap;
+    saveRun();
     renderRunner();
   });
 }
@@ -1029,7 +1034,7 @@ function renderHelp() {
 }
 
 function finishRun() {
-  if (RUN.isPrehab) { const t = RUN.title || "Prehab"; stopRest(); RUN = null; toast(t + " done"); setTab("today"); return; }
+  if (RUN.isPrehab) { const t = RUN.title || "Prehab"; stopRest(); RUN = null; saveRun(); toast(t + " done"); setTab("today"); return; }
   const entries = Object.entries(RUN.data).map(([exId, sets]) => {
     const variation = sets.variation;
     const clean = sets.filter((s) => s && (s.reps != null || s.load != null || s.dist != null))
@@ -1045,6 +1050,7 @@ function finishRun() {
   save();
   stopRest();
   RUN = null;
+  saveRun();
   toast("Workout saved");
   setTab("today");
 }
@@ -1555,7 +1561,7 @@ function renderMore() {
 }
 
 /* ---------- boot ---------- */
-setTab("today");
+if (RUN) { current = "today"; renderRunner(); } else { setTab("today"); }
 if (SY.key) syncNow({ rerender: true });
 window.addEventListener("online", () => syncNow({ rerender: true }));
 document.addEventListener("visibilitychange", () => { if (!document.hidden) syncNow({ rerender: true }); });
