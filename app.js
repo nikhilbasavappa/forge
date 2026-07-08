@@ -492,6 +492,7 @@ function setProtein(g) {
 
 /* ---------- walking (NEAT) ---------- */
 function walkToday() { const w = S.walks.find((x) => x.date === today()); return w ? (+w.min || 0) : 0; }
+function inclineToday() { const w = S.walks.find((x) => x.date === today()); return w && w.incline != null ? +w.incline : null; }
 function addWalk(m) {
   const i = S.walks.findIndex((x) => x.date === today());
   if (i >= 0) S.walks[i] = { ...S.walks[i], min: Math.max(0, (+S.walks[i].min || 0) + m), _m: Date.now() };
@@ -500,8 +501,14 @@ function addWalk(m) {
 }
 function setWalk(m) {
   const i = S.walks.findIndex((x) => x.date === today());
-  const rec = { date: today(), min: Math.max(0, m), _m: Date.now() };
-  if (i >= 0) S.walks[i] = rec; else S.walks.push(rec);
+  if (i >= 0) S.walks[i] = { ...S.walks[i], min: Math.max(0, m), _m: Date.now() };
+  else S.walks.push({ date: today(), min: Math.max(0, m), _m: Date.now() });
+  save();
+}
+function setIncline(v) {
+  const i = S.walks.findIndex((x) => x.date === today());
+  if (i >= 0) S.walks[i] = { ...S.walks[i], incline: Math.max(0, v), _m: Date.now() };
+  else S.walks.push({ date: today(), min: 0, incline: Math.max(0, v), _m: Date.now() });
   save();
 }
 
@@ -839,6 +846,7 @@ function renderToday() {
   // walk / NEAT logger — after the session, since that's usually when it happens
   const wkMin = walkToday(), wkTgt = S.profile.walkTarget || 0;
   const wkPct = wkTgt ? Math.min(100, Math.round((wkMin / wkTgt) * 100)) : 0;
+  const wkIncline = inclineToday();
   html += `
     <div class="blk-title"><span class="dot"></span>Walk today</div>
     <div class="card">
@@ -849,6 +857,14 @@ function renderToday() {
       <div class="qadd">
         ${[10, 20, 30].map((m) => `<button class="qbtn" data-walk="${m}">+${m}</button>`).join("")}
         <input id="w-set" inputmode="numeric" placeholder="set exact (min)" />
+      </div>
+      <div class="row" style="margin-top:10px;gap:10px;align-items:center">
+        <span class="eqk">Incline</span>
+        <select id="w-incline">
+          <option value="">–</option>
+          ${Array.from({ length: 13 }, (_, n) => n).map((n) => `<option value="${n}" ${wkIncline === n ? "selected" : ""}>${n}</option>`).join("")}
+        </select>
+        ${wkIncline != null ? `<span class="tiny muted">of 12</span>` : ""}
       </div>
     </div>`;
 
@@ -872,6 +888,8 @@ function renderToday() {
   document.querySelectorAll("[data-walk]").forEach((b) => b.onclick = () => { addWalk(+b.dataset.walk); renderToday(); });
   const wset = document.getElementById("w-set");
   if (wset) wset.onchange = (e) => { const v = e.target.value.trim(); if (v !== "") { setWalk(Number(v)); renderToday(); } };
+  const wInc = document.getElementById("w-incline");
+  if (wInc) wInc.onchange = (e) => { const v = e.target.value; if (v !== "") { setIncline(Number(v)); renderToday(); } };
 }
 
 /* ---------- GUIDED WORKOUT RUNNER ---------- */
@@ -1132,6 +1150,8 @@ function renderReview() {
   const proteinHit = wkN.filter((n) => (+n.protein || 0) >= (S.profile.proteinTarget || 0)).length;
   const wkW = S.walks.filter((w) => inWeek(w.date) && w.min != null);
   const walkAvg = wkW.length ? Math.round(wkW.reduce((s, w) => s + (+w.min || 0), 0) / wkW.length) : null;
+  const wkWi = wkW.filter((w) => w.incline != null);
+  const inclineAvg = wkWi.length ? (wkWi.reduce((s, w) => s + (+w.incline || 0), 0) / wkWi.length).toFixed(1) : null;
   const wkC = S.checkins.filter((c) => inWeek(c.date));
   const sleepV = wkC.filter((c) => c.sleep != null);
   const sleepAvg = sleepV.length ? (sleepV.reduce((s, c) => s + (+c.sleep), 0) / sleepV.length).toFixed(1) : null;
@@ -1155,7 +1175,7 @@ function renderReview() {
     <div class="blk-title"><span class="dot"></span>Fuel &amp; movement</div>
     <div class="card tight">
       ${row("Protein", proteinAvg != null ? `${proteinAvg} g/day avg · hit target ${proteinHit}/${wkN.length}d` : "not logged")}
-      ${row("Walking", walkAvg != null ? `${walkAvg} min/day · ${wkW.length} days` : "not logged")}
+      ${row("Walking", walkAvg != null ? `${walkAvg} min/day · ${wkW.length} days${inclineAvg != null ? ` · incline ${inclineAvg}/12 avg` : ""}` : "not logged")}
       ${row("Sleep", sleepAvg != null ? `${sleepAvg} h avg` : "not logged")}
       ${row("Alcohol", `${alcNights} night${alcNights === 1 ? "" : "s"}`)}
     </div>
@@ -1652,7 +1672,12 @@ function buildExport() {
     md += `- Protein: avg ${avg} g/day over ${recentN.length} logged days (target ${S.profile.proteinTarget})\n`;
   } else { md += `- Protein: not logged\n`; }
   const recentWk = S.walks.filter((w) => daysAgo(w.date) <= 8 && w.min != null);
-  if (recentWk.length) { const wavg = Math.round(recentWk.reduce((s, w) => s + (+w.min || 0), 0) / recentWk.length); md += `- Walking: avg ${wavg} min/day over ${recentWk.length} days\n`; }
+  if (recentWk.length) {
+    const wavg = Math.round(recentWk.reduce((s, w) => s + (+w.min || 0), 0) / recentWk.length);
+    const wkInc = recentWk.filter((w) => w.incline != null);
+    const iavg = wkInc.length ? (wkInc.reduce((s, w) => s + (+w.incline || 0), 0) / wkInc.length).toFixed(1) : null;
+    md += `- Walking: avg ${wavg} min/day over ${recentWk.length} days${iavg != null ? `, avg incline ${iavg}/12` : ""}\n`;
+  }
   const sc = S.checkins.filter((c) => c.sleep != null);
   if (sc.length) {
     const avgH = (sc.reduce((s, c) => s + (+c.sleep), 0) / sc.length).toFixed(1);
