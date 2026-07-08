@@ -4,7 +4,7 @@
 const KEY = "forge.v1";
 const DEFAULT_STATE = {
   v: 1,
-  profile: { heightIn: 68, startWeight: 155, proteinTarget: 155, weeklyTarget: 4, restDefault: 90, walkTarget: 30 },
+  profile: { heightIn: 68, startWeight: 155, proteinTarget: 155, weeklyTarget: 4, restDefault: 90, walkTarget: 30, dumbbellStep: 5 },
   programIndex: 0,        // which session in SESSION_ORDER is next
   workouts: [],           // {id, date, sessionKey, entries:[{exId, variation, sets:[{reps,load,unit,rpe}]}], note}
   checkins: [],           // {date, energy(1-5), sleep(hrs), pains:[{area,sev(0-3)}], note}
@@ -286,6 +286,10 @@ function setRung(exId, rung) {
 }
 function isBodyweightMode() { return typeof BW_SWAPS !== "undefined" && S.swaps && S.swaps.band_curl === BW_SWAPS.band_curl && S.swaps.band_press === BW_SWAPS.band_press; }
 function dumbbellMode(ex) { return S.equipment && S.equipment.dumbbells && ex.load === "band" && /curl|press|fly|row|squat|rdl|pressdown/i.test(ex.name + " " + (ex.cat || "")); }
+// Numeric-load exercises are the ones the weight-progression engine can auto-step:
+// dumbbell-mode band moves once dumbbells are on, plus anything already tracked in lb (backpack curl).
+function isNumericLoad(ex) { return dumbbellMode(ex) || ex.load === "weight"; }
+function loadStep(ex) { return (S.profile && +S.profile.dumbbellStep) || 5; }
 
 /* ---------- smart engine: readiness, momentum, stalls, cadence ---------- */
 function daysBetween(a, b) { return Math.round((new Date(b.replace(/-/g, "/")) - new Date(a.replace(/-/g, "/"))) / 86400000); }
@@ -308,7 +312,10 @@ function exHistory(exId) {
   S.workouts.forEach((w) => {
     const e = w.entries.find((x) => x.exId === exId); if (!e) return;
     const sets = e.sets.filter((s) => s.reps != null); if (!sets.length) return;
-    out.push({ date: w.date, top: Math.max(...sets.map((s) => +s.reps || 0)), rpe: Math.max(0, ...sets.map((s) => +s.rpe || 0)) || null });
+    const top = Math.max(...sets.map((s) => +s.reps || 0));
+    const topSet = sets.find((s) => +s.reps === top) || sets[0];
+    const loadNum = topSet && topSet.load != null && topSet.load !== "" && isFinite(+topSet.load) ? +topSet.load : null;
+    out.push({ date: w.date, top, rpe: Math.max(0, ...sets.map((s) => +s.rpe || 0)) || null, load: loadNum });
   });
   return out;
 }
@@ -317,11 +324,15 @@ function momentum(exId, ex) {
   const h = exHistory(exId); if (h.length < 2) return false;
   return h.slice(-2).every((s) => s.top >= ex.target.hi && (!s.rpe || s.rpe <= 8));
 }
+// Stalled = no rep PR AND no load increase across 3 sessions — weight-aware so a session
+// right after a load step-up (reps intentionally reset to the low end) isn't misread as a plateau.
 function isStalled(exId, ex) {
   if (ex.load === "time" || ex.load === "cardio") return false;
   const h = exHistory(exId); if (h.length < 3) return false;
   const w = h.slice(-3);
-  return Math.max(...w.map((s) => s.top)) <= w[0].top; // no new high across 3 sessions
+  const noRepPR = Math.max(...w.map((s) => s.top)) <= w[0].top;
+  const loadRose = w.some((s, i) => i > 0 && s.load != null && w[i - 1].load != null && s.load > w[i - 1].load);
+  return noRepPR && !loadRose;
 }
 // Blended daily readiness 0–100 from energy, sleep, quality, pain, accumulated fatigue.
 // Average RPE across the most recent logged session — an implicit fatigue signal.
@@ -391,8 +402,10 @@ function prescribe(exId) {
     return { setsCount, perSet: Array.from({ length: setsCount }, () => ({ reps: base, last: null, load: null })), note: "Baseline — find a clean working weight" };
   }
   const lastSets = last.entry.sets.filter((s) => s.reps != null || s.load != null);
+  const numericLoad = isNumericLoad(ex);
+  const step = loadStep(ex);
   const perSet = [];
-  let anyAdd = false;
+  let anyAdd = false, steppedTo = null;
   for (let i = 0; i < setsCount; i++) {
     const ls = lastSets[i] || lastSets[lastSets.length - 1] || {};
     const lastReps = ls.reps != null ? +ls.reps : null;
@@ -403,18 +416,24 @@ function prescribe(exId) {
       const r = lastReps || ex.target.lo;
       const hitTop = r >= ex.target.hi && (!ls.rpe || ls.rpe <= 8);
       if (hitTop) anyAdd = true;
-      perSet.push({ reps: hitTop ? ex.target.lo : Math.min(ex.target.hi, r + 1), last: lastReps, load: ls.load ?? null, addLoad: hitTop });
+      // Double progression: climb reps to the top of the range, then on the NEXT session
+      // reset reps to the bottom and step the weight up — for numeric-load exercises this
+      // is computed and pre-filled automatically; you can still type over it.
+      const lastLoadNum = numericLoad && ls.load != null && ls.load !== "" && isFinite(+ls.load) ? +ls.load : null;
+      let nextLoad = ls.load ?? null, loadStepped = false;
+      if (hitTop && numericLoad && lastLoadNum != null) { nextLoad = lastLoadNum + step; loadStepped = true; steppedTo = nextLoad; }
+      perSet.push({ reps: hitTop ? ex.target.lo : Math.min(ex.target.hi, r + 1), last: lastReps, load: nextLoad, addLoad: hitTop, loadStepped, prevLoad: lastLoadNum });
     }
   }
   if (deload) {
-    perSet.forEach((p) => { p.addLoad = false; if (p.last != null) p.reps = p.last; });
+    perSet.forEach((p) => { p.addLoad = false; p.loadStepped = false; if (p.last != null) p.reps = p.last; });
     return { setsCount, perSet, note: "Deload — lighter, leave 2–3 reps in reserve" };
   }
   let note;
   if (rd && rd.band === "low") note = "Low readiness — cut it back, easy sets";
   else if (rd && rd.band === "moderate") note = "Moderate readiness — one less set";
   else if (mo) note = rd && rd.band === "primed" ? "Primed + cruising — add a set and load" : "Cruising — add load or a harder variation";
-  else if (anyAdd) note = "Cleared the range — add load this time";
+  else if (anyAdd) note = steppedTo != null ? `Cleared the range — stepped up to ${steppedTo}lb` : "Cleared the range — add load this time";
   else note = ex.load === "time" ? "Beat last time's hold" : "Beat last time's reps";
   return { setsCount, perSet, note };
 }
@@ -967,13 +986,15 @@ function renderRunner() {
   for (let i = 0; i < pres.setsCount; i++) {
     const p = pres.perSet[i] || {};
     const ev = existing && existing[i];
-    const repsVal = ev && ev.reps != null ? ev.reps : (cardio ? p.reps : (p.last ?? ""));
+    // After a load step, default to the reset-to-bottom target reps, not the old (heavier-unrelated) rep count —
+    // otherwise a quick tap-through would log the old high rep count at the new heavier weight.
+    const repsVal = ev && ev.reps != null ? ev.reps : (cardio ? p.reps : (p.loadStepped ? p.reps : (p.last ?? "")));
     const cellVal = cardio ? (ev && ev.dist != null ? ev.dist : "") : (ev && ev.load != null ? ev.load : (p.load ?? ""));
     const rpeVal = ev && ev.rpe ? ev.rpe : "";
     let tgt;
     if (cardio) tgt = cardioTarget(exId, ex);
     else if (timed) tgt = p.last != null ? `hold — beat ${fmtDur(p.last)}` : "hold — hit ‘time it’ to run the timer";
-    else tgt = `${p.reps}${p.addLoad ? " +load" : ""}`;
+    else tgt = `${p.reps}${p.loadStepped ? ` · stepped to ${p.load}lb (was ${p.prevLoad})` : (p.addLoad ? " +load" : "")}`;
     const cellHtml = timed ? `<button class="qbtn holdbtn" data-hold="${i}">⏱ time it</button>` : runnerLoadCell({ ...ex, load: effLoad }, i, cellVal);
     rows += `<div class="setrow">
       <button class="setdone ${ev && ev.done ? "on" : ""}" data-set="${i}" title="mark done + rest">${i + 1}</button>
@@ -1818,7 +1839,9 @@ function renderMore() {
         <label class="fld"><span class="lt">Protein target (g)</span><input id="p-prot" inputmode="numeric" value="${esc(S.profile.proteinTarget)}"/></label>
         <label class="fld"><span class="lt">Sessions / week</span><input id="p-wk" inputmode="numeric" value="${esc(S.profile.weeklyTarget)}"/></label>
         <label class="fld"><span class="lt">Walk target (min)</span><input id="p-walk" inputmode="numeric" value="${esc(S.profile.walkTarget)}"/></label>
+        <label class="fld"><span class="lt">Dumbbell step (lb)</span><input id="p-step" inputmode="decimal" value="${esc(S.profile.dumbbellStep)}"/></label>
       </div>
+      <div class="tiny muted" style="margin-top:8px">Dumbbell step = the smallest jump your dumbbells allow. Once weights hit top of their rep range at RPE≤8, the app auto-steps the load by this much next time.</div>
       <button class="btn" id="p-save" style="margin-top:12px">Save profile</button>
     </div>
     <div class="card tight center tiny muted">
@@ -1863,6 +1886,7 @@ function renderMore() {
     S.profile.proteinTarget = Number(document.getElementById("p-prot").value) || S.profile.proteinTarget;
     S.profile.weeklyTarget = Number(document.getElementById("p-wk").value) || S.profile.weeklyTarget;
     S.profile.walkTarget = Number(document.getElementById("p-walk").value) || S.profile.walkTarget;
+    S.profile.dumbbellStep = Number(document.getElementById("p-step").value) || S.profile.dumbbellStep;
     S._m = Date.now();
     save(); toast("Profile saved");
   };
