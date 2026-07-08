@@ -399,7 +399,10 @@ function prescribe(exId) {
 
   if (!last) {
     const base = ex.load === "time" ? ex.target.sec : ex.target.lo;
-    return { setsCount, perSet: Array.from({ length: setsCount }, () => ({ reps: base, last: null, load: null })), note: "Baseline — find a clean working weight" };
+    const baseNote = ex.load === "time" ? "Baseline — see how long you can hold"
+      : (ex.load === "reps" || !ex.load) ? "Baseline — see how many clean reps you can do"
+      : "Baseline — find a clean working weight";
+    return { setsCount, perSet: Array.from({ length: setsCount }, () => ({ reps: base, last: null, load: null })), note: baseNote };
   }
   const lastSets = last.entry.sets.filter((s) => s.reps != null || s.load != null);
   const numericLoad = isNumericLoad(ex);
@@ -982,6 +985,11 @@ function renderRunner() {
   const timed = effLoad === "time";
   const cardio = effLoad === "cardio";
   const displayName = ex.ladder ? curVar.replace(/\s*\(time\)/i, "") : ex.name;
+  // Persistent column headers — the inputs' placeholder text disappears the moment a value
+  // is pre-filled (baseline, carried-forward, or a stepped load), which is most of the time.
+  const col1Head = cardio || timed ? "sec" : "reps";
+  const col2Head = cardio ? "strokes" : timed ? "" : (ex.load === "reps" || !ex.load ? "bw" : (dumbbellMode(ex) ? "lb" : ex.load === "band" ? "band" : "lb"));
+  const setsHead = `<div class="setrow sethead"><span></span><span class="colhead">${esc(col1Head)}</span><span class="colhead">${esc(col2Head)}</span><span class="colhead">rpe</span></div>`;
   let rows = "";
   for (let i = 0; i < pres.setsCount; i++) {
     const p = pres.perSet[i] || {};
@@ -1017,14 +1025,14 @@ function renderRunner() {
     <div class="runbar"><div class="runbar-fill" style="width:${pct}%"></div></div>
     ${RUN.date ? `<div class="banner">Backdating this session to ${esc(prettyDate(RUN.date))}. Enter what you actually did, or leave blank to log the target.</div>` : ""}
     <div class="card">
-      <div class="row"><div class="name">${esc(displayName)}</div><span class="pill">${timed ? `${pres.setsCount}× hold` : targetLabel(ex)}</span></div>
-      ${ex.ladder ? `<div class="tiny muted" style="margin:-2px 0 4px">${esc(ex.name)}${timed ? " · timed hold" : ""}</div>` : ""}
+      <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${timed ? `${pres.setsCount}× hold` : targetLabel(ex)}</span></div>
+      ${ex.ladder ? `<div class="tiny muted" style="margin:-2px 0 4px">Variation: ${esc(displayName)}${timed ? " · timed hold" : ""}</div>` : ""}
       <div class="cue">${esc(ex.ladder && timed ? "Hold with good form as long as you can — no reps. Tap ‘time it’ to run the clock." : ex.cue)}</div>
       ${equipLine(ex)}${setupLine(ex)}
       <div class="meta"><span class="pill ${prescribeLvl(pres)}">${esc(pres.note)}</span>${demoLink(ex)}<button class="linkbtn" id="run-swap">Swap →</button></div>
       ${lastLabel(exId) ? `<div class="lastnote">${esc(lastLabel(exId))} → aim to beat it</div>` : ""}
       ${ladderCtl}
-      <div class="sets">${rows}</div>
+      <div class="sets">${setsHead}${rows}</div>
     </div>
     <div id="swap-panel"></div>
     <div class="restchips"><span class="label">Rest</span>${[60, 90, 120].map((s) => `<button class="qbtn" data-rest="${s}">${fmtClock(s)}</button>`).join("")}</div>
@@ -1054,7 +1062,7 @@ function captureRun(exId) {
   const ex = EXERCISES[exId];
   const pres = ex ? prescribe(exId) : null;
   const sets = [];
-  document.querySelectorAll(".sets .setrow").forEach((row) => {
+  document.querySelectorAll(".sets .setrow:not(.sethead)").forEach((row) => {
     const reps = row.querySelector('[data-f="reps"]'), load = row.querySelector('[data-f="load"]'), dist = row.querySelector('[data-f="dist"]'), rpe = row.querySelector('[data-f="rpe"]');
     const i = +reps.dataset.set;
     const done = row.querySelector(".setdone")?.classList.contains("on") || false;
@@ -1263,7 +1271,7 @@ function renderHelp() {
     <div class="card">
       ${d("3×8–12", "3 sets of 8 to 12 reps. \"/side\" means per side. Timed work shows minutes:seconds (5:00 = 5 min).")}
       ${d("RPE (6–10)", "How hard the set felt. 10 = nothing left in the tank; 8 ≈ 2 reps in reserve. <b>Log it honestly</b> — the app uses it to decide when to push you.")}
-      ${d("Target", "The number to beat, pre-filled with what you actually did last time.")}
+      ${d("Target", "The number to beat, pre-filled with what you actually did last time — or, right after a weight step-up, reset to the bottom of the rep range at the new heavier load.")}
       ${d("Swap", "Sub an exercise (e.g. the shoulder flares up). It sticks for future sessions; undo in More → Equipment.")}
       ${d("Variation", "For progressions (push-up, pull-up, chin-up) — which rung of the ladder you're on.")}
       ${d("Rest timer", "Tap a preset; it counts down and beeps/vibrates at zero.")}
@@ -1278,7 +1286,7 @@ function renderHelp() {
 
     <div class="blk-title"><span class="dot"></span>How it adapts</div>
     <div class="card">
-      ${d("Progression", "Double progression: beat last time's reps within the range. Hit the <b>top</b> of the range at an easy RPE → it tells you to add load or a harder variation.")}
+      ${d("Progression", "Double progression: beat last time's reps within the range. Hit the <b>top</b> of the range at an easy RPE → for a bodyweight ladder it suggests a harder variation; for a real weight (once Dumbbells are on in More → Equipment) it auto-steps the load and resets reps to the bottom of the range for you.")}
       ${d("Momentum", "Clear a lift's top range two sessions running → \"cruising,\" it pushes you to load up instead of creeping one rep at a time.")}
       ${d("Stall", "No new best in 3 sessions on a lift → it suggests swapping or deloading <i>that</i> lift so you don't grind a plateau.")}
       ${d("Deload", "A lighter recovery week, auto-flagged after shoulder pain 3+ days, low energy 3+ days, or ~4 weeks training straight. Cuts volume ~40%, holds load.")}
@@ -1289,7 +1297,7 @@ function renderHelp() {
     <div class="card">
       ${d("A / B / C rotation", "Do \"the next one\" whenever you train — 3 or 5 days a week both work, and travel never breaks the plan.")}
       ${d("Prehab", "The short scapula/posture warm-up block that opens each session.")}
-      ${d("Daily prehab / Mobility", "Standalone off-day routines (dead hangs, stretches). Guided, not logged.")}
+      ${d("Daily prehab / Mobility", "Standalone off-day routines (dead hangs, stretches). Logged separately from real sessions — counts toward a \"rehab/mobility\" tally on Today and in the weekly review, but doesn't advance the A/B/C rotation.")}
       ${d("Bodyweight mode", "More → Equipment. One tap swaps every band/dumbbell move to a bodyweight or backpack version when you've no gear.")}
     </div>
 
