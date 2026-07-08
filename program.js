@@ -4,7 +4,7 @@
  * This is data only — app.js handles logging, progression, and adaptation.
  */
 
-const PROGRAM_VERSION = 2;
+const PROGRAM_VERSION = 3;
 
 /* Exercise library.
  * load:   'reps' | 'time' | 'band' | 'weight' | 'reps+load'
@@ -14,6 +14,9 @@ const PROGRAM_VERSION = 2;
  * equip:  array of equipment you must physically have to do this exact variant
  * setup:  one line on how to set the equipment/body up before the first rep
  * q:      YouTube search query for a demo video (must match the exact variant)
+ * muscle: primary target for strength-pool exercises (drives session generation —
+ *         see MUSCLE_TARGETS/MUSCLE_POOLS in app.js). Omitted for prehab/core/cond/mobility,
+ *         which are selected by `cat` instead.
  */
 const EXERCISES = {
   // ---- Prehab / posture (most sessions open with these) ----
@@ -25,14 +28,14 @@ const EXERCISES = {
     q: "scapular wall slides exercise"
   },
   band_pull_apart: {
-    name: "Band Pull-Apart", cat: "pull", load: "band", target: { sets: 3, lo: 12, hi: 20 },
+    name: "Band Pull-Apart", cat: "pull", muscle: "rear_delts", load: "band", target: { sets: 3, lo: 12, hi: 20 },
     equip: ["Bands"],
     setup: "Hold a band in front of you at shoulder width and height, arms straight.",
     cue: "Working set for rear delts/mid-back — pick a band you feel by the last reps. Arms straight, retract the shoulder blades, no shrug.",
     q: "band pull apart exercise"
   },
   face_pull: {
-    name: "Band Face Pull", cat: "pull", load: "band", target: { sets: 3, lo: 12, hi: 20 },
+    name: "Band Face Pull", cat: "pull", muscle: "rear_delts", load: "band", target: { sets: 3, lo: 12, hi: 20 },
     equip: ["Bands", "Anchor point"],
     setup: "Anchor a band at face height (door hinge or the pull-up bar), a handle in each hand, step back for tension.",
     cue: "Working set, not a warmup — progress the band. Pull to the face, elbows high, rotate hands back at the end.",
@@ -62,7 +65,7 @@ const EXERCISES = {
 
   // ---- Pull ----
   pullup_prog: {
-    name: "Pull-Up Progression", cat: "pull", load: "reps", target: { sets: 3, lo: 3, hi: 8 },
+    name: "Pull-Up Progression", cat: "pull", muscle: "back", load: "reps", target: { sets: 3, lo: 3, hi: 8 },
     equip: ["Pull-up bar"],
     setup: "Hang from the pull-up bar with an overhand grip (palms away), hands shoulder-width.",
     ladder: ["Dead hang (time)", "Scapular pull (shrug at bottom)", "Negative (slow lower)", "Band-assisted pull-up", "Full pull-up", "Weighted pull-up"],
@@ -70,7 +73,7 @@ const EXERCISES = {
     q: "pull up progression beginner"
   },
   trx_row: {
-    name: "Suspension / Inverted Row", cat: "pull", load: "reps", target: { sets: 3, lo: 8, hi: 12 },
+    name: "Suspension / Inverted Row", cat: "pull", muscle: "back", load: "reps", target: { sets: 3, lo: 8, hi: 12 },
     equip: ["Suspension trainer or low bar"],
     setup: "Set a suspension trainer or a bar at hip height; lie underneath, grip the handles, body straight. No suspension trainer? Swap to the Table Inverted Row.",
     cue: "Body straight. Retract shoulder blades, pull elbows back. Walk feet forward to add difficulty.",
@@ -78,14 +81,14 @@ const EXERCISES = {
     q: "inverted row suspension trainer"
   },
   door_row: {
-    name: "Table Inverted Row", cat: "pull", load: "reps", target: { sets: 3, lo: 8, hi: 15 },
+    name: "Table Inverted Row", cat: "pull", muscle: "back", load: "reps", target: { sets: 3, lo: 8, hi: 15 },
     equip: ["Sturdy table"],
     setup: "Lie under a sturdy table and grip the edge with both hands (or loop a towel around a latched door's handles and hold both ends). Plant your feet, hang with a straight body, and pull your chest up to your hands.",
     cue: "Retract the shoulder blades and lead with the elbows. The more horizontal your body, the harder it gets. Control the descent.",
     q: "bodyweight inverted row under table no equipment"
   },
   band_row: {
-    name: "Band Seated Row", cat: "pull", load: "band", target: { sets: 3, lo: 12, hi: 15 },
+    name: "Band Seated Row", cat: "pull", muscle: "back", load: "band", target: { sets: 3, lo: 12, hi: 15 },
     equip: ["Bands"],
     setup: "Sit on the floor, loop a band around your feet (or anchor it low), a handle in each hand, arms extended.",
     cue: "Anchor low. Row to the hips, retract shoulder blades. Keep shoulders back at full extension.",
@@ -94,7 +97,7 @@ const EXERCISES = {
 
   // ---- Push (chest = priority weak spot; conservative on the shoulder) ----
   pushup_prog: {
-    name: "Push-Up Progression", cat: "push", load: "reps", target: { sets: 3, lo: 6, hi: 12 },
+    name: "Push-Up Progression", cat: "push", muscle: "chest", load: "reps", target: { sets: 3, lo: 6, hi: 12 },
     equip: ["Floor"],
     setup: "Hands under the shoulders in a plank. Hands up on a counter/wall makes it easier; feet up on a chair/bed makes it harder.",
     ladder: ["Hands elevated (high)", "Hands elevated (low)", "Knee push-up", "Full push-up", "Feet elevated (upper chest)", "Weighted / band"],
@@ -102,49 +105,49 @@ const EXERCISES = {
     q: "decline push up upper chest"
   },
   band_press: {
-    name: "Band / Floor Chest Press", cat: "push", load: "band", target: { sets: 3, lo: 10, hi: 15 },
+    name: "Band / Floor Chest Press", cat: "push", muscle: "chest", load: "band", target: { sets: 3, lo: 10, hi: 15 },
     equip: ["Bands", "Anchor point"],
     setup: "Anchor a band behind you at chest height (or lie on it), a handle in each hand starting low by the ribs.",
     cue: "Press LOW-TO-HIGH — hands start low, drive up and together — to bias the upper chest (your lagging area). Adduct across the chest at lockout, control the return.",
     q: "low to high band chest press upper chest"
   },
   pike_pushup: {
-    name: "Pike Push-Up", cat: "push", load: "reps", target: { sets: 2, lo: 6, hi: 10 },
+    name: "Pike Push-Up", cat: "push", muscle: "chest", load: "reps", target: { sets: 2, lo: 6, hi: 10 },
     equip: ["Floor"],
     setup: "Start in a downward-dog: hips high, hands and feet on the floor, head between the arms.",
     cue: "Hips high, lower the head toward the floor. Stop if the left shoulder is symptomatic.",
     q: "pike push up exercise"
   },
   band_pressdown: {
-    name: "Band Triceps Pushdown", cat: "push", load: "band", target: { sets: 3, lo: 12, hi: 15 },
+    name: "Band Triceps Pushdown", cat: "push", muscle: "triceps", load: "band", target: { sets: 3, lo: 12, hi: 15 },
     equip: ["Bands", "Anchor point"],
     setup: "Anchor a band high (over a door or the pull-up bar), grip it with both hands, elbows pinned to your sides.",
     cue: "Anchor the band high. Pin the elbows to your sides, extend fully, control back up. Shoulder-friendly triceps work.",
     q: "band triceps pushdown exercise"
   },
   band_fly: {
-    name: "Band Chest Fly", cat: "push", load: "band", target: { sets: 3, lo: 12, hi: 15 },
+    name: "Band Chest Fly", cat: "push", muscle: "chest", load: "band", target: { sets: 3, lo: 12, hi: 15 },
     equip: ["Bands", "Anchor point"],
     setup: "Anchor a band low behind you, a handle in each hand, arms open at chest height with a slight elbow bend.",
     cue: "Anchor LOW behind you and arc the hands up-and-together (low-to-high) to hit the upper chest. Slight fixed elbow bend, squeeze the chest, control the stretch. Isolates the pecs without loading the triceps.",
     q: "low to high band chest fly upper chest"
   },
   lateral_raise: {
-    name: "Lateral Raise (delt width)", cat: "push", load: "band", target: { sets: 3, lo: 12, hi: 20 },
+    name: "Lateral Raise (delt width)", cat: "push", muscle: "side_delts", load: "band", target: { sets: 3, lo: 12, hi: 20 },
     equip: ["Bands or dumbbells"],
     setup: "Stand on the middle of a band with a handle in each hand (or hold a light weight / water bottle in each hand) at your sides.",
     cue: "Raise out to shoulder height, slight forward tilt, pinkies leading; control the descent. Light and strict — this is the side-delt 'cap' for shoulder width. Water bottles work if you've no bands/dumbbells yet.",
     q: "dumbbell lateral raise side delt form"
   },
   band_curl: {
-    name: "Biceps Curl (supinated)", cat: "pull", load: "band", target: { sets: 3, lo: 8, hi: 15 },
+    name: "Biceps Curl (supinated)", cat: "pull", muscle: "biceps", load: "band", target: { sets: 3, lo: 8, hi: 15 },
     equip: ["Bands"],
     setup: "Stand on the middle of a band, a handle in each hand, palms forward, elbows pinned.",
     cue: "Elbows pinned, full range, squeeze hard at the top, slow descent. 8–15 reps near failure, add load over time. Builds the peak / long head. Use dumbbells once you have them — bands run out of tension here.",
     q: "dumbbell biceps curl exercise"
   },
   hammer_curl: {
-    name: "Hammer Curl (neutral grip)", cat: "pull", load: "band", target: { sets: 3, lo: 8, hi: 15 },
+    name: "Hammer Curl (neutral grip)", cat: "pull", muscle: "biceps", load: "band", target: { sets: 3, lo: 8, hi: 15 },
     equip: ["Bands or dumbbells"],
     setup: "Stand on a band (or hold a weight in each hand) with a neutral grip, thumbs up, elbows pinned.",
     cue: "Palms neutral (thumbs up), curl with control. Trains the brachialis under the biceps — adds thickness and pushes the peak up. Load it: dumbbells beat bands here.",
@@ -153,7 +156,7 @@ const EXERCISES = {
 
   // ---- Legs ----
   goblet_squat: {
-    name: "Goblet / Bodyweight Squat", cat: "legs", load: "reps", target: { sets: 3, lo: 10, hi: 15 },
+    name: "Goblet / Bodyweight Squat", cat: "legs", muscle: "legs", load: "reps", target: { sets: 3, lo: 10, hi: 15 },
     equip: ["Floor"],
     setup: "Stand feet shoulder-width, toes slightly out. Hold a weight/loaded backpack at your chest if you have one, otherwise bodyweight.",
     ladder: ["Box squat", "Bodyweight squat", "Tempo bodyweight", "Goblet (band/weight)"],
@@ -161,14 +164,14 @@ const EXERCISES = {
     q: "goblet squat exercise"
   },
   split_squat: {
-    name: "Split Squat", cat: "legs", load: "reps", target: { sets: 3, lo: 8, hi: 12 }, side: true,
+    name: "Split Squat", cat: "legs", muscle: "legs", load: "reps", target: { sets: 3, lo: 8, hi: 12 }, side: true,
     equip: ["Floor"],
     setup: "Stand in a long split stance, back heel lifted, torso tall.",
     cue: "Long stance. Lower the back knee straight down. Weight on the front heel.",
     q: "split squat exercise form"
   },
   rdl: {
-    name: "Hip Hinge / RDL", cat: "legs", load: "band", target: { sets: 3, lo: 10, hi: 15 },
+    name: "Hip Hinge / RDL", cat: "legs", muscle: "legs", load: "band", target: { sets: 3, lo: 10, hi: 15 },
     equip: ["Bands or backpack"],
     setup: "Stand on the middle of a band holding the handles at your thighs (or hold a loaded backpack), feet hip-width.",
     cue: "Hips back, soft knees, flat back. Load the hamstrings, stand tall via the glutes.",
@@ -238,7 +241,7 @@ const EXERCISES = {
 
   // ---- Bodyweight / household substitutes (Phase 1, before bands/dumbbells) ----
   chinup_prog: {
-    name: "Chin-Up Progression (biceps)", cat: "pull", load: "reps", target: { sets: 3, lo: 3, hi: 8 },
+    name: "Chin-Up Progression (biceps)", cat: "pull", muscle: "biceps", load: "reps", target: { sets: 3, lo: 3, hi: 8 },
     equip: ["Pull-up bar"],
     setup: "Hang from the bar with an underhand grip (palms toward you), hands shoulder-width.",
     ladder: ["Dead hang (time)", "Scapular pull", "Negative chin (slow lower)", "Chair-assisted chin-up", "Full chin-up", "Weighted chin-up"],
@@ -246,14 +249,14 @@ const EXERCISES = {
     q: "chin up progression beginner"
   },
   prone_row: {
-    name: "Prone Row / Bat Wing", cat: "pull", load: "reps", target: { sets: 3, lo: 10, hi: 15 },
+    name: "Prone Row / Bat Wing", cat: "pull", muscle: "rear_delts", load: "reps", target: { sets: 3, lo: 10, hi: 15 },
     equip: ["Floor"],
     setup: "Lie face-down, arms hanging toward the floor (elevate your chest on a bed edge for more range).",
     cue: "Face-down, arms hanging. Row the elbows up high and squeeze the shoulder blades for a count. Rear delts and mid-back without a band.",
     q: "prone row bat wing rear delt exercise"
   },
   diamond_pushup: {
-    name: "Diamond Push-Up (triceps)", cat: "push", load: "reps", target: { sets: 3, lo: 6, hi: 12 },
+    name: "Diamond Push-Up (triceps)", cat: "push", muscle: "triceps", load: "reps", target: { sets: 3, lo: 6, hi: 12 },
     equip: ["Floor"],
     setup: "Plank with the hands together under your chest, thumbs and index fingers forming a diamond.",
     ladder: ["Hands elevated", "Knee diamond", "Full diamond", "Feet elevated"],
@@ -261,21 +264,21 @@ const EXERCISES = {
     q: "diamond push up exercise"
   },
   deep_pushup: {
-    name: "Deep / Feet-Elevated Push-Up (chest)", cat: "push", load: "reps", target: { sets: 3, lo: 8, hi: 12 },
+    name: "Deep / Feet-Elevated Push-Up (chest)", cat: "push", muscle: "chest", load: "reps", target: { sets: 3, lo: 8, hi: 12 },
     equip: ["Floor", "Chair"],
     setup: "Feet up on a chair/bed for the upper chest, or hands on two books for a deeper pec stretch.",
     cue: "Feet up on a chair/bed to bias the UPPER chest (your lagging area), or hands on books for a deeper pec stretch. Control the bottom. The bodyweight chest-fly stand-in.",
     q: "feet elevated decline push up upper chest"
   },
   backpack_curl: {
-    name: "Backpack Curl", cat: "pull", load: "weight", target: { sets: 3, lo: 10, hi: 15 },
+    name: "Backpack Curl", cat: "pull", muscle: "biceps", load: "weight", target: { sets: 3, lo: 10, hi: 15 },
     equip: ["Backpack"],
     setup: "Load a backpack with books or water jugs; hold it by the base or top handle, elbows pinned.",
     cue: "Load a backpack with books or water jugs. Curl with elbows pinned, squeeze the top, slow lower. Add books to progress.",
     q: "backpack biceps curl no weights"
   },
   sl_rdl: {
-    name: "Single-Leg RDL", cat: "legs", load: "reps", target: { sets: 3, lo: 8, hi: 12 }, side: true,
+    name: "Single-Leg RDL", cat: "legs", muscle: "legs", load: "reps", target: { sets: 3, lo: 8, hi: 12 }, side: true,
     equip: ["Floor"],
     setup: "Stand on one leg, slight knee bend, other foot ready to extend behind. Hold a loaded backpack to add load.",
     cue: "Hinge at the hip on one leg, back flat, free leg extending behind for balance. Feel the hamstring. Hold a backpack to load it.",
@@ -328,43 +331,21 @@ const EXERCISES = {
   },
 };
 
-/* Sessions — a rotating A/B/C deck. Do "the next one" whenever you train,
- * so 3 or 5 days a week both work and travel never breaks the plan.
+/* Session generation — no fixed deck. Each session is assembled live from what's actually
+ * due: which muscles haven't been trained recently (weighted by priority), today's readiness,
+ * and pain flags. See generateSession() in app.js.
+ *
+ * MUSCLE_TARGETS: ideal days between sessions that train this muscle (lower = trained more
+ * often). Reflects his stated priorities: chest/back/biceps are the gaps and get trained
+ * most often; triceps/legs ride along and are deliberately less frequent.
  */
-const SESSIONS = {
-  A: {
-    name: "A · Back & Arms",
-    focus: "Mid-back, lats, rear delts, biceps + triceps, core",
-    blocks: [
-      { title: "Prehab", ex: ["wall_slides", "scap_pushup", "thoracic_open"] },
-      { title: "Strength", ex: ["pullup_prog", "trx_row", "face_pull", "band_curl", "hammer_curl", "band_pressdown"] },
-      { title: "Core", ex: ["dead_bug", "hanging_knee"] },
-      { title: "Conditioning", ex: ["row_steady"] },
-    ],
-  },
-  B: {
-    name: "B · Chest & Delts",
-    focus: "Chest (upper bias), side delts, triceps, legs, core",
-    blocks: [
-      { title: "Prehab", ex: ["wall_slides", "face_pull", "prone_ytw"] },
-      { title: "Strength", ex: ["pushup_prog", "band_press", "lateral_raise", "diamond_pushup", "goblet_squat"] },
-      { title: "Core", ex: ["plank", "pallof"] },
-      { title: "Conditioning", ex: ["row_steady"] },
-    ],
-  },
-  C: {
-    name: "C · Full Body & Arms",
-    focus: "Mid-back, upper chest, side delts, hamstrings, biceps, engine",
-    blocks: [
-      { title: "Prehab", ex: ["scap_pushup", "prone_ytw", "thoracic_open"] },
-      { title: "Strength", ex: ["band_row", "band_fly", "lateral_raise", "rdl", "band_curl", "hammer_curl"] },
-      { title: "Core", ex: ["hollow_hold", "hanging_knee"] },
-      { title: "Conditioning", ex: ["row_intervals"] },
-    ],
-  },
-};
+const MUSCLE_TARGETS = { back: 2.5, chest: 2.5, rear_delts: 3, side_delts: 3.5, biceps: 2.5, triceps: 3.5, legs: 3.5 };
+const MUSCLE_DISPLAY = { back: "Back", chest: "Chest", rear_delts: "Rear Delts", side_delts: "Side Delts", biceps: "Biceps", triceps: "Triceps", legs: "Legs" };
 
-const SESSION_ORDER = ["A", "B", "C"];
+/* Curated pool for the opening posture/scapula block — always 3 of these 4, rotated so it's
+ * not the identical trio every time. Separate from PREHAB_ROUTINE/MOBILITY_ROUTINE (app.js),
+ * which are the standalone off-day routines. */
+const PREHAB_BLOCK_POOL = ["wall_slides", "scap_pushup", "thoracic_open", "prone_ytw"];
 
 const PAIN_AREAS = ["Winged scapula / L shoulder blade", "L shoulder (old dislocation)", "Neck / upper back", "Lower back", "Other"];
 

@@ -84,12 +84,7 @@ h2.sec, .blk-title {
   background: none; border: none; padding: 0; cursor: pointer; color: var(--ox);
   font-family: var(--m); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.12em;
 }
-.mast-main { display: flex; align-items: flex-start; gap: 16px; margin: 14px 0 4px; }
-.mast-letter {
-  font-size: 5.2rem; font-weight: 800; line-height: 0.82; letter-spacing: -0.05em;
-  color: var(--ox); font-variant-numeric: normal;
-}
-.mast-name { padding-top: 6px; }
+.mast-name { margin: 14px 0 4px; }
 .mast-title { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.05; }
 .mast-focus { color: var(--mut); font-size: 0.92rem; margin-top: 4px; }
 .mast-meta { display: flex; gap: 7px; flex-wrap: wrap; margin: 16px 0 0; }
@@ -300,4 +295,4 @@ input::placeholder { color: var(--mut); opacity: 0.7; }
 .pgrid figcaption { font-family: var(--m); font-size: 0.6rem; color: var(--mut); margin-top: 3px; text-align: center; }
 
 /* numerals in data contexts */
-.mast-letter, .pill, .lastnote, .sub, .setrow, .chart, .bignum { font-variant-numeric: tabular-nums; }
+.pill, .lastnote, .sub, .setrow, .chart, .bignum { font-variant-numeric: tabular-nums; }

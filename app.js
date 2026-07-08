@@ -5,8 +5,8 @@ const KEY = "forge.v1";
 const DEFAULT_STATE = {
   v: 1,
   profile: { heightIn: 68, startWeight: 155, proteinTarget: 155, weeklyTarget: 4, restDefault: 90, walkTarget: 30, dumbbellStep: 5 },
-  programIndex: 0,        // which session in SESSION_ORDER is next
-  workouts: [],           // {id, date, sessionKey, entries:[{exId, variation, sets:[{reps,load,unit,rpe}]}], note}
+  todaySession: null,     // {date, sess} — cached generated session so it doesn't reshuffle on every re-render (see getTodaySession)
+  workouts: [],           // {id, date, sessionKey, entries:[{exId, variation, sets:[{reps,load,unit,rpe}]}], note} — sessionKey now holds a generated title string, not a fixed A/B/C key
   checkins: [],           // {date, energy(1-5), sleep(hrs), pains:[{area,sev(0-3)}], note}
   measurements: [],       // {date, weight, waist, chest, arm}
   nutrition: [],          // {date, protein(g), _m}
@@ -99,7 +99,7 @@ function mergeStates(a, b) {
   const ac = {};
   [...(a.activity || []), ...(b.activity || [])].forEach((x) => { const e = ac[x.id]; if (!e || (x._m || 0) >= (e._m || 0)) ac[x.id] = x; });
   out.activity = Object.values(ac).sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : x.id - y.id));
-  if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.programIndex = b.programIndex; out.equipment = b.equipment; out.swaps = b.swaps; out.ladders = b.ladders; out.deloadWeek = b.deloadWeek; out._m = b._m; }
+  if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.equipment = b.equipment; out.swaps = b.swaps; out.ladders = b.ladders; out.deloadWeek = b.deloadWeek; out._m = b._m; }
   return out;
 }
 
@@ -266,8 +266,7 @@ function daysAgo(s) {
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 /* ---------- domain helpers ---------- */
-function nextSessionKey() { return SESSION_ORDER[S.programIndex % SESSION_ORDER.length]; }
-function exFlat(sessionKey) { return SESSIONS[sessionKey].blocks.flatMap((b) => b.ex); }
+function blocksFlat(sess) { return sess.blocks.flatMap((b) => b.ex); }
 function resolveEx(exId) { return (S.swaps && S.swaps[exId]) || exId; }
 // Which rung of a progression the app has assigned (it assigns; it doesn't ask the user to choose).
 function assignedRung(exId) {
@@ -366,6 +365,112 @@ function readiness() {
   s = Math.max(0, Math.min(100, Math.round(s)));
   const band = s >= 75 ? "primed" : s >= 58 ? "ready" : s >= 44 ? "moderate" : "low";
   return { score: s, band, implicit };
+}
+
+/* ---------- session generator ---------- */
+// exId -> muscle, derived once from EXERCISES so the pool can't drift out of sync with the data.
+const MUSCLE_POOLS = (() => {
+  const pools = {};
+  for (const [id, ex] of Object.entries(EXERCISES)) if (ex.muscle) (pools[ex.muscle] = pools[ex.muscle] || []).push(id);
+  return pools;
+})();
+function daysSinceExercise(exId) {
+  const l = lastEntry(exId);
+  return l ? daysAgo(l.date) : 999;
+}
+// Scans real sessions + off-day activity for the most recent time ANY exercise tagged with
+// this muscle was trained — so daily prehab/mobility work (which overlaps some muscle pools)
+// counts toward freshness too, not just full sessions.
+function daysSinceMuscle(muscle) {
+  let best = Infinity;
+  const scan = (arr) => (arr || []).forEach((w) => (w.entries || []).forEach((e) => {
+    const ex = EXERCISES[e.exId];
+    if (ex && ex.muscle === muscle) best = Math.min(best, daysAgo(w.date));
+  }));
+  scan(S.workouts); scan(S.activity);
+  return best === Infinity ? 999 : best;
+}
+// Least-recently-used pick from a pool, with a random tie-break so equally-stale options
+// (most commonly "never done") don't always resolve to the same exercise.
+function pickLRU(pool, n) {
+  return pool.map((id) => ({ id, days: daysSinceExercise(id), r: Math.random() }))
+    .sort((a, b) => (b.days - a.days) || (b.r - a.r))
+    .slice(0, Math.min(n, pool.length))
+    .map((s) => s.id);
+}
+function joinNice(arr) {
+  if (arr.length <= 1) return arr.join("");
+  if (arr.length === 2) return arr.join(" & ");
+  return arr.slice(0, -1).join(", ") + " & " + arr[arr.length - 1];
+}
+// Assembles today's session live from what's actually due — no fixed deck. Looks at which
+// muscles haven't been trained recently (weighted by MUSCLE_TARGETS priority), today's
+// readiness, and pain flags, the same way a trainer would eyeball you before picking the day's
+// work. Always returns the same {title, focus, blocks, reasons} shape the old fixed SESSIONS
+// table did, so the rest of the app (renderToday, sessionEquip, etc.) doesn't need to know
+// sessions are generated rather than looked up.
+function generateSession() {
+  const ci = todaysCheckin();
+  const rd = readiness();
+  const shoulderPain = ci && (ci.pains || []).some((p) => p.sev >= 2 && /scapula|shoulder/i.test(p.area));
+  const reasons = [];
+
+  const prehabEx = pickLRU(PREHAB_BLOCK_POOL, 3);
+
+  let candidates = Object.keys(MUSCLE_TARGETS);
+  if (shoulderPain) {
+    candidates = candidates.filter((m) => m !== "chest" && m !== "triceps");
+    reasons.push("Shoulder flagged today — chest and triceps pressing skipped.");
+  }
+  const ranked = candidates
+    .map((m) => ({ m, due: daysSinceMuscle(m) / MUSCLE_TARGETS[m] }))
+    .sort((a, b) => b.due - a.due);
+
+  let strengthSlots = 5;
+  if (rd.band === "low") { strengthSlots = 3; reasons.push("Low readiness — trimmed to fewer strength moves."); }
+  else if (rd.band === "moderate") { strengthSlots = 4; reasons.push("Moderate readiness — one fewer strength move than usual."); }
+
+  const chosenMuscles = ranked.slice(0, Math.min(strengthSlots, ranked.length));
+  const strengthEx = chosenMuscles.map(({ m }) => pickLRU(MUSCLE_POOLS[m] || [], 1)[0]).filter(Boolean);
+
+  chosenMuscles.slice(0, 2).forEach(({ m }) => {
+    const d = daysSinceMuscle(m);
+    reasons.unshift(d >= 999 ? `${MUSCLE_DISPLAY[m]} — never trained, prioritized.` : `${MUSCLE_DISPLAY[m]} — ${d}d since last trained, prioritized.`);
+  });
+
+  const corePool = Object.keys(EXERCISES).filter((id) => EXERCISES[id].cat === "core");
+  const coreEx = pickLRU(corePool, 2);
+
+  const condPool = Object.keys(EXERCISES).filter((id) => EXERCISES[id].cat === "cond");
+  const condEx = rd.band === "low" ? [] : pickLRU(condPool, 1);
+  if (rd.band === "low") reasons.push("Low readiness — conditioning skipped, rest it out.");
+
+  const blocks = [
+    { title: "Prehab", ex: prehabEx },
+    { title: "Strength", ex: strengthEx },
+    { title: "Core", ex: coreEx },
+    { title: "Conditioning", ex: condEx },
+  ].filter((b) => b.ex.length);
+
+  const title = joinNice(chosenMuscles.slice(0, 3).map(({ m }) => MUSCLE_DISPLAY[m])) || "Full Body";
+  const focusParts = chosenMuscles.map(({ m }) => MUSCLE_DISPLAY[m].toLowerCase());
+  focusParts.push("core");
+  if (condEx.length) focusParts.push("conditioning");
+  const focus = focusParts.join(", ").replace(/^./, (c) => c.toUpperCase());
+
+  return { title, focus, blocks, reasons };
+}
+// Cached per calendar day so the exercise list doesn't reshuffle every time Today re-renders
+// (which happens on nearly every tap — protein, walk, etc). Regenerating is an explicit action.
+function getTodaySession() {
+  if (S.todaySession && S.todaySession.date === today()) return S.todaySession.sess;
+  return regenerateSession();
+}
+function regenerateSession() {
+  const sess = generateSession();
+  S.todaySession = { date: today(), sess };
+  S._m = Date.now(); save();
+  return sess;
 }
 
 function strokeRate(strokes, timeSec) {
@@ -749,21 +854,24 @@ function setupLine(ex) {
   return `<div class="setupline"><span class="eqk">Setup</span><span class="eqv">${esc(ex.setup)}</span></div>`;
 }
 // All equipment the (resolved, swap-aware) session needs today — deduped, order-preserved.
-function sessionEquip(key) {
+function sessionEquip(sess) {
   const out = [];
-  for (const blk of SESSIONS[key].blocks)
+  for (const blk of sess.blocks)
     for (const rawId of blk.ex) {
       const ex = EXERCISES[resolveEx(rawId)];
       for (const e of equipList(ex)) if (!out.includes(e)) out.push(e);
     }
   return out;
 }
-// Data-completeness check (the honest version of a post-generation validation pass for a fixed deck).
+// Data-completeness check. With no fixed deck, "reachable" means every exercise the generator
+// could ever pick (anything with a muscle tag, or cat prehab/core/cond) plus its resolved swaps.
 function validateProgram() {
-  const seen = new Set(), problems = [];
-  for (const key of SESSION_ORDER)
-    for (const blk of SESSIONS[key].blocks)
-      for (const rawId of blk.ex) { seen.add(rawId); seen.add(resolveEx(rawId)); (ALTS[rawId] || []).forEach((a) => seen.add(a)); }
+  const seen = new Set();
+  for (const [id, ex] of Object.entries(EXERCISES)) {
+    if (!ex.muscle && !["prehab", "core", "cond"].includes(ex.cat)) continue; // mobility-only, not generator-reachable
+    seen.add(id); seen.add(resolveEx(id)); (ALTS[id] || []).forEach((a) => seen.add(a));
+  }
+  const problems = [];
   for (const id of seen) {
     const ex = EXERCISES[id];
     if (!ex) { problems.push(`${id}: missing from EXERCISES`); continue; }
@@ -793,8 +901,7 @@ function lastLabel(exId) {
 
 /* ---------- TODAY ---------- */
 function renderToday() {
-  const key = nextSessionKey();
-  const sess = SESSIONS[key];
+  const sess = getTodaySession();
   const ci = todaysCheckin();
   TITLE.textContent = "Today";
   SUB.textContent = prettyDate(today());
@@ -807,27 +914,20 @@ function renderToday() {
        ${(ci.pains || []).filter((p) => p.sev > 0).length ? `<span class="pill bad">${(ci.pains || []).filter((p) => p.sev > 0).length} pain flag(s)</span>` : `<span class="pill good">No pain flags</span>`}`
     : `<span class="pill warn">No check-in</span>`;
 
-  const title = sess.name.replace(/^[A-C] · /, "");
   const sw = sessionsThisWeek(), wt = S.profile.weeklyTarget || 4;
   const weekPill = `<span class="pill ${sw >= wt ? "good" : "acc"}">Week ${sw}/${wt}</span>`;
   const actWk = activityThisWeek();
   const actPill = actWk ? `<span class="pill">+${actWk} rehab/mobility</span>` : "";
-  const lastW = S.workouts[S.workouts.length - 1];
-  const whyText = lastW
-    ? `Why ${key}? Last trained ${lastW.sessionKey} · ${daysAgo(lastW.date)}d ago — ${key} is next in your A/B/C rotation. It advances each time you finish a session.`
-    : `Why ${key}? Nothing logged yet, so you're at the start of the rotation and targets are baseline. Finish a session to advance the letter and start adapting.`;
+  const whyText = sess.reasons.length ? sess.reasons.join(" ") : "Balanced session — nothing especially overdue or flagged today.";
   let html = `
     <div class="masthead">
       <div class="mast-top">
-        <span class="label">Next session</span>
-        <button class="linkbtn" id="switch-sess">Switch →</button>
+        <span class="label">Today's session</span>
+        ${RUN ? "" : `<button class="linkbtn" id="regen-sess">Regenerate →</button>`}
       </div>
-      <div class="mast-main">
-        <div class="mast-letter">${esc(key)}</div>
-        <div class="mast-name">
-          <div class="mast-title">${esc(title)}</div>
-          <div class="mast-focus">${esc(sess.focus)}</div>
-        </div>
+      <div class="mast-name">
+        <div class="mast-title">${esc(sess.title)}</div>
+        <div class="mast-focus">${esc(sess.focus)}</div>
       </div>
       <div class="mast-meta">${rdPill}${readinessTags}${weekPill}${actPill}</div>
       <div class="why">${esc(whyText)}</div>
@@ -836,7 +936,7 @@ function renderToday() {
     </div>`;
 
   // Today's equipment — everything this session needs, so nothing is a surprise mid-workout.
-  const todayEquip = sessionEquip(key);
+  const todayEquip = sessionEquip(sess);
   if (todayEquip.length) {
     html += `<div class="equipsum">
       <span class="eqk">Today's equipment</span>
@@ -918,17 +1018,15 @@ function renderToday() {
   html += `<button class="btn ghost" id="start-prehab" style="margin-top:20px">Daily prehab — off-day routine</button>`;
   html += `<button class="btn ghost" id="start-mobility" style="margin-top:8px">Mobility &amp; stretch — cooldown / off-day</button>`;
   VIEW.innerHTML = html;
-  document.getElementById("start-log").onclick = () => { if (RUN) renderRunner(); else startRun(key); };
+  document.getElementById("start-log").onclick = () => { if (RUN) renderRunner(); else startRun(sess); };
   document.getElementById("start-prehab").onclick = () => { if (RUN) renderRunner(); else startPrehab(); };
   document.getElementById("start-mobility").onclick = () => { if (RUN) renderRunner(); else startMobility(); };
   const dOn = document.getElementById("deload-on"); if (dOn) dOn.onclick = () => { S.deloadWeek = weekStartStr(new Date()); S._m = Date.now(); save(); toast("Deload week on"); renderToday(); };
   const dOff = document.getElementById("deload-off"); if (dOff) dOff.onclick = () => { S.deloadWeek = null; S._m = Date.now(); save(); renderToday(); };
   const rm = document.getElementById("rec-mob"); if (rm) rm.onclick = () => startMobility();
   document.querySelectorAll("[data-exhist]").forEach((el) => el.onclick = () => renderExercise(el.dataset.exhist));
-  document.getElementById("switch-sess").onclick = () => {
-    const cur = SESSION_ORDER.indexOf(key);
-    S.programIndex = (cur + 1) % SESSION_ORDER.length; S._m = Date.now(); save(); renderToday();
-  };
+  const regen = document.getElementById("regen-sess");
+  if (regen) regen.onclick = () => { regenerateSession(); toast("New session generated"); renderToday(); };
   document.querySelectorAll("[data-protein]").forEach((b) => b.onclick = () => { addProtein(+b.dataset.protein); renderToday(); });
   const pset = document.getElementById("p-set");
   if (pset) pset.onchange = (e) => { const v = e.target.value.trim(); if (v !== "") { setProtein(Number(v)); renderToday(); } };
@@ -944,16 +1042,17 @@ const RUN_KEY = "forge.run";
 let RUN = (() => { try { return JSON.parse(localStorage.getItem(RUN_KEY)) || null; } catch { return null; } })();
 function saveRun() { if (RUN) localStorage.setItem(RUN_KEY, JSON.stringify(RUN)); else localStorage.removeItem(RUN_KEY); }
 
-function startRun(key, dateStr) {
-  RUN = { key, list: exFlat(key).map(resolveEx), idx: 0, startTs: Date.now(), data: {}, date: dateStr || null };
+function startRun(sess, dateStr) {
+  const rawList = blocksFlat(sess);
+  RUN = { title: sess.title, rawList, list: rawList.map(resolveEx), idx: 0, startTs: Date.now(), data: {}, date: dateStr || null };
   saveRun(); renderRunner();
 }
 function startPrehab() {
-  RUN = { key: "Prehab", list: PREHAB_ROUTINE.slice(), idx: 0, startTs: Date.now(), data: {}, isPrehab: true, title: "Daily prehab" };
+  RUN = { title: "Daily prehab", list: PREHAB_ROUTINE.slice(), idx: 0, startTs: Date.now(), data: {}, isPrehab: true, activityType: "prehab" };
   saveRun(); renderRunner();
 }
 function startMobility() {
-  RUN = { key: "Mobility", list: MOBILITY_ROUTINE.slice(), idx: 0, startTs: Date.now(), data: {}, isPrehab: true, title: "Mobility & stretch" };
+  RUN = { title: "Mobility & stretch", list: MOBILITY_ROUTINE.slice(), idx: 0, startTs: Date.now(), data: {}, isPrehab: true, activityType: "mobility" };
   saveRun(); renderRunner();
 }
 function prescribeLvl(p) { return /add load|cruising/i.test(p.note) ? "good" : /readiness|deload/i.test(p.note) ? "warn" : "acc"; }
@@ -975,7 +1074,7 @@ function renderRunner() {
   const pres = prescribe(exId);
   const existing = RUN.data[exId];
   const elapsed = Math.round((Date.now() - RUN.startTs) / 60000);
-  TITLE.textContent = RUN.isPrehab ? RUN.title : `Session ${RUN.key}`;
+  TITLE.textContent = RUN.title;
   SUB.textContent = RUN.date ? `Backdating ${prettyDate(RUN.date)} · exercise ${RUN.idx + 1} / ${total}` : `Exercise ${RUN.idx + 1} / ${total} · ${elapsed} min`;
 
   // The app ASSIGNS the rung/variation — the user doesn't choose it (they can only bump it up/down).
@@ -1137,7 +1236,7 @@ function swapAltList(exId, reason) {
 }
 function applySwap(altId) {
   const cur = RUN.list[RUN.idx];
-  const origId = exFlat(RUN.key).find((o) => resolveEx(o) === cur) || cur;
+  const origId = (RUN.rawList || RUN.list).find((o) => resolveEx(o) === cur) || cur;
   S.swaps[origId] = altId; S._m = Date.now(); save();
   RUN.list[RUN.idx] = altId; saveRun(); renderRunner();
 }
@@ -1244,7 +1343,7 @@ function renderReview() {
       ${row("Mobility", `${mobilityN} session${mobilityN === 1 ? "" : "s"}`)}
     </div>
     <div class="blk-title"><span class="dot"></span>Sessions this week</div>
-    <div class="card tight">${wkWorkouts.length ? wkWorkouts.map((w) => `<div class="row small" style="padding:7px 0;border-top:1px solid var(--line)"><span class="muted">${prettyDate(w.date)}</span><span>${esc((SESSIONS[w.sessionKey] || {}).name || w.sessionKey)}</span></div>`).join("") : `<div class="tiny muted">No sessions logged yet this week.</div>`}</div>
+    <div class="card tight">${wkWorkouts.length ? wkWorkouts.map((w) => `<div class="row small" style="padding:7px 0;border-top:1px solid var(--line)"><span class="muted">${prettyDate(w.date)}</span><span>${esc(w.sessionKey)}</span></div>`).join("") : `<div class="tiny muted">No sessions logged yet this week.</div>`}</div>
     <button class="btn" id="rv-export" style="margin-top:16px">Copy full summary for Claude</button>`;
   document.getElementById("rv-back").onclick = () => setTab("more");
   document.getElementById("rv-export").onclick = async () => {
@@ -1296,9 +1395,9 @@ function renderHelp() {
 
     <div class="blk-title"><span class="dot"></span>Sessions &amp; routines</div>
     <div class="card">
-      ${d("A / B / C rotation", "Do \"the next one\" whenever you train — 3 or 5 days a week both work, and travel never breaks the plan.")}
-      ${d("Prehab", "The short scapula/posture warm-up block that opens each session.")}
-      ${d("Daily prehab / Mobility", "Standalone off-day routines (dead hangs, stretches). Logged separately from real sessions — counts toward a \"rehab/mobility\" tally on Today and in the weekly review, but doesn't advance the A/B/C rotation.")}
+      ${d("Today's session", "No fixed rotation — it's assembled live each time from what's actually due: which muscles haven't been trained recently (weighted by priority), today's readiness, and pain flags. The \"Why\" line under the title explains the picks. Don't like it? Tap Regenerate.")}
+      ${d("Prehab", "The short scapula/posture warm-up block that opens each session — 3 of 4 corrective drills, rotated.")}
+      ${d("Daily prehab / Mobility", "Standalone off-day routines (dead hangs, stretches). Logged separately from real sessions — counts toward a \"rehab/mobility\" tally on Today and in the weekly review, and feeds into what counts as \"recently trained\" for the next generated session.")}
       ${d("Bodyweight mode", "More → Equipment. One tap swaps every band/dumbbell move to a bodyweight or backpack version when you've no gear.")}
     </div>
 
@@ -1359,8 +1458,8 @@ function finishRun() {
   const leveled = advanceLadders(entries);
   const date = RUN.date || today();
   if (RUN.isPrehab) {
-    const type = RUN.key === "Mobility" ? "mobility" : "prehab";
-    const title = RUN.title || RUN.key;
+    const type = RUN.activityType;
+    const title = RUN.title;
     insertActivitySorted({ id: Date.now(), date, type, title, entries, _m: Date.now() });
     S._m = Date.now();
     save();
@@ -1372,11 +1471,7 @@ function finishRun() {
     return;
   }
   const note = RUN.date ? "Backdated manual entry" : "";
-  insertWorkoutSorted({ id: Date.now(), date, sessionKey: RUN.key, entries, note, _m: Date.now() });
-  // Rotation follows the most recently DATED workout, not just the one just saved —
-  // so backdating an earlier missed session doesn't undo progress made after it.
-  const latest = S.workouts[S.workouts.length - 1];
-  S.programIndex = (SESSION_ORDER.indexOf(latest.sessionKey) + 1) % SESSION_ORDER.length;
+  insertWorkoutSorted({ id: Date.now(), date, sessionKey: RUN.title, entries, note, _m: Date.now() });
   S._m = Date.now();
   save();
   stopRest();
@@ -1741,7 +1836,7 @@ function buildExport() {
   md += `\n## Workouts (last week)\n`;
   if (!recentW.length) md += `_none logged_\n`;
   recentW.forEach((w) => {
-    md += `\n**${w.date} — ${SESSIONS[w.sessionKey].name}**\n`;
+    md += `\n**${w.date} — ${w.sessionKey}**\n`;
     w.entries.forEach((e) => {
       const ex = EXERCISES[e.exId];
       const sets = e.sets.map((s) => `${s.reps ?? "?"}${s.load ? "@" + s.load : ""}${s.rpe ? " (RPE" + s.rpe + ")" : ""}`).join(", ");
@@ -1812,12 +1907,10 @@ function renderMore() {
     </div>
     <div class="blk-title"><span class="dot"></span>Log a past session</div>
     <div class="card">
-      <div class="small muted">Trained but it never saved, or forgot to log same-day? Pick the date and which session it was — it opens the normal guided runner backdated to that day.</div>
+      <div class="small muted">Trained but it never saved, or forgot to log same-day? Pick the date — it generates a session and opens the normal guided runner backdated to that day.</div>
       <label class="fld" style="margin-top:12px"><span class="lt">Date</span>
         <input id="bd-date" type="date" max="${esc(today())}" value="${esc(yesterday())}"/></label>
-      <div class="row" style="gap:8px;margin-top:10px">
-        ${SESSION_ORDER.map((k) => `<button class="btn ghost" style="flex:1" data-bd-sess="${k}">${esc(k)}</button>`).join("")}
-      </div>
+      <button class="btn ghost" id="bd-go" style="margin-top:10px">Generate & log</button>
     </div>
     <div class="blk-title"><span class="dot"></span>Weekly review export</div>
     <div class="card">
@@ -1862,12 +1955,12 @@ function renderMore() {
 
   document.getElementById("open-review").onclick = () => renderReview();
   document.getElementById("open-help").onclick = () => renderHelp();
-  document.querySelectorAll("[data-bd-sess]").forEach((b) => b.onclick = () => {
+  document.getElementById("bd-go").onclick = () => {
     const d = document.getElementById("bd-date").value;
     if (!d) { toast("Pick a date first"); return; }
     if (d > today()) { toast("Can't backdate to the future"); return; }
-    startRun(b.dataset.bdSess, d);
-  });
+    startRun(generateSession(), d);
+  };
   document.getElementById("exp-copy").onclick = async () => {
     const md = buildExport();
     try { await navigator.clipboard.writeText(md); toast("Copied — paste to Claude"); }
