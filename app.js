@@ -247,6 +247,7 @@ function renderBuddy() {
 /* ---------- date / util ---------- */
 const pad = (n) => String(n).padStart(2, "0");
 function today() { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
+function yesterday() { const d = new Date(); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
 function prettyDate(s) {
   const [y, m, d] = s.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
@@ -350,10 +351,9 @@ function readiness() {
   return { score: s, band, implicit };
 }
 
-function pace500(distM, timeSec) {
-  if (!distM || !timeSec) return null;
-  const s = Math.round((timeSec / distM) * 500);
-  return `${Math.floor(s / 60)}:${pad(s % 60)}/500m`;
+function strokeRate(strokes, timeSec) {
+  if (!strokes || !timeSec) return null;
+  return `${Math.round((strokes / timeSec) * 60)} spm`;
 }
 function lastCardio(exId) {
   const l = lastEntry(exId); if (!l) return null;
@@ -361,15 +361,15 @@ function lastCardio(exId) {
 }
 function cardioTarget(exId, ex) {
   const lc = lastCardio(exId);
-  if (lc) { const p = pace500(lc.dist, lc.time || ex.target.sec); return `beat ${lc.dist}m in ${fmtDur(ex.target.sec)}${p ? " · " + p : ""}`; }
-  return `${fmtDur(ex.target.sec)} — log your meters`;
+  if (lc) { const p = strokeRate(lc.dist, lc.time || ex.target.sec); return `beat ${lc.dist} strokes in ${fmtDur(ex.target.sec)}${p ? " · " + p : ""}`; }
+  return `${fmtDur(ex.target.sec)} — log your strokes`;
 }
 
 // Auto-progression: per-set targets scaled by readiness (both directions) + momentum.
 function prescribe(exId) {
   const ex = EXERCISES[exId];
   if (ex.load === "cardio") {
-    return { setsCount: ex.target.sets, perSet: Array.from({ length: ex.target.sets }, () => ({ reps: ex.target.sec })), note: lastCardio(exId) ? "Beat last distance in the same time" : "Steady pace — log your meters" };
+    return { setsCount: ex.target.sets, perSet: Array.from({ length: ex.target.sets }, () => ({ reps: ex.target.sec })), note: lastCardio(exId) ? "Beat last stroke count in the same time" : "Steady pace — log your strokes" };
   }
   const last = lastEntry(exId);
   const deload = deloadActive();
@@ -414,6 +414,13 @@ function prescribe(exId) {
   return { setsCount, perSet, note };
 }
 
+// Keeps S.workouts date-ordered so lastEntry()/recentAvgRpe() (which read by array position)
+// stay correct even when a session is logged out of order (backdating a missed day).
+function insertWorkoutSorted(w) {
+  let i = S.workouts.length;
+  while (i > 0 && S.workouts[i - 1].date > w.date) i--;
+  S.workouts.splice(i, 0, w);
+}
 function lastEntry(exId) {
   for (let i = S.workouts.length - 1; i >= 0; i--) {
     const e = S.workouts[i].entries.find((x) => x.exId === exId);
@@ -489,6 +496,12 @@ function addWalk(m) {
   const i = S.walks.findIndex((x) => x.date === today());
   if (i >= 0) S.walks[i] = { ...S.walks[i], min: Math.max(0, (+S.walks[i].min || 0) + m), _m: Date.now() };
   else S.walks.push({ date: today(), min: Math.max(0, m), _m: Date.now() });
+  save();
+}
+function setWalk(m) {
+  const i = S.walks.findIndex((x) => x.date === today());
+  const rec = { date: today(), min: Math.max(0, m), _m: Date.now() };
+  if (i >= 0) S.walks[i] = rec; else S.walks.push(rec);
   save();
 }
 
@@ -664,7 +677,7 @@ document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () 
 
 /* ---------- target label ---------- */
 function targetLabel(ex) {
-  if (ex.load === "cardio") return `${fmtDur(ex.target.sec)} · dist`;
+  if (ex.load === "cardio") return `${fmtDur(ex.target.sec)} · strokes`;
   if (ex.load === "time") return `${ex.target.sets}×${fmtDur(ex.target.sec)}`;
   return `${ex.target.sets}×${ex.target.lo}–${ex.target.hi}${ex.side ? "/side" : ""}`;
 }
@@ -715,8 +728,8 @@ function lastLabel(exId) {
   if (!l) return null;
   const cardioSet = l.entry.sets.find((s) => s.dist != null);
   if (cardioSet) {
-    const p = pace500(+cardioSet.dist, +cardioSet.reps);
-    return `Last (${daysAgo(l.date)}d): ${cardioSet.dist}m${cardioSet.reps ? " in " + fmtDur(+cardioSet.reps) : ""}${p ? " · " + p : ""}`;
+    const p = strokeRate(+cardioSet.dist, +cardioSet.reps);
+    return `Last (${daysAgo(l.date)}d): ${cardioSet.dist} strokes${cardioSet.reps ? " in " + fmtDur(+cardioSet.reps) : ""}${p ? " · " + p : ""}`;
   }
   const parts = l.entry.sets.filter((s) => s.reps != null).map((s) => {
     const u = s.load ? ` @ ${esc(String(s.load))}${s.unit ? esc(s.unit) : ""}` : "";
@@ -835,6 +848,7 @@ function renderToday() {
       <div class="pbar"><div class="pbar-fill" style="width:${wkPct}%"></div></div>
       <div class="qadd">
         ${[10, 20, 30].map((m) => `<button class="qbtn" data-walk="${m}">+${m}</button>`).join("")}
+        <input id="w-set" inputmode="numeric" placeholder="set exact (min)" />
       </div>
     </div>`;
 
@@ -856,6 +870,8 @@ function renderToday() {
   const pset = document.getElementById("p-set");
   if (pset) pset.onchange = (e) => { const v = e.target.value.trim(); if (v !== "") { setProtein(Number(v)); renderToday(); } };
   document.querySelectorAll("[data-walk]").forEach((b) => b.onclick = () => { addWalk(+b.dataset.walk); renderToday(); });
+  const wset = document.getElementById("w-set");
+  if (wset) wset.onchange = (e) => { const v = e.target.value.trim(); if (v !== "") { setWalk(Number(v)); renderToday(); } };
 }
 
 /* ---------- GUIDED WORKOUT RUNNER ---------- */
@@ -863,8 +879,8 @@ const RUN_KEY = "forge.run";
 let RUN = (() => { try { return JSON.parse(localStorage.getItem(RUN_KEY)) || null; } catch { return null; } })();
 function saveRun() { if (RUN) localStorage.setItem(RUN_KEY, JSON.stringify(RUN)); else localStorage.removeItem(RUN_KEY); }
 
-function startRun(key) {
-  RUN = { key, list: exFlat(key).map(resolveEx), idx: 0, startTs: Date.now(), data: {} };
+function startRun(key, dateStr) {
+  RUN = { key, list: exFlat(key).map(resolveEx), idx: 0, startTs: Date.now(), data: {}, date: dateStr || null };
   saveRun(); renderRunner();
 }
 function startPrehab() {
@@ -877,7 +893,7 @@ function startMobility() {
 }
 function prescribeLvl(p) { return /add load|cruising/i.test(p.note) ? "good" : /readiness|deload/i.test(p.note) ? "warn" : "acc"; }
 function runnerLoadCell(ex, i, val) {
-  if (ex.load === "cardio") return `<input data-set="${i}" data-f="dist" inputmode="numeric" placeholder="meters" value="${esc(val ?? "")}" />`;
+  if (ex.load === "cardio") return `<input data-set="${i}" data-f="dist" inputmode="numeric" placeholder="strokes" value="${esc(val ?? "")}" />`;
   if (ex.load === "reps" || !ex.load) return `<div class="tiny muted center">BW</div>`;
   if (ex.load === "time") return `<input data-set="${i}" data-f="load" placeholder="—" value="${esc(val ?? "")}" />`;
   const db = dumbbellMode(ex);
@@ -895,7 +911,7 @@ function renderRunner() {
   const existing = RUN.data[exId];
   const elapsed = Math.round((Date.now() - RUN.startTs) / 60000);
   TITLE.textContent = RUN.isPrehab ? RUN.title : `Session ${RUN.key}`;
-  SUB.textContent = `Exercise ${RUN.idx + 1} / ${total} · ${elapsed} min`;
+  SUB.textContent = RUN.date ? `Backdating ${prettyDate(RUN.date)} · exercise ${RUN.idx + 1} / ${total}` : `Exercise ${RUN.idx + 1} / ${total} · ${elapsed} min`;
 
   // The app ASSIGNS the rung/variation — the user doesn't choose it (they can only bump it up/down).
   const rung = ex.ladder ? assignedRung(exId) : 0;
@@ -936,6 +952,7 @@ function renderRunner() {
   const pct = Math.round((RUN.idx / total) * 100);
   VIEW.innerHTML = `
     <div class="runbar"><div class="runbar-fill" style="width:${pct}%"></div></div>
+    ${RUN.date ? `<div class="banner">Backdating this session to ${esc(prettyDate(RUN.date))}. Enter what you actually did, or leave blank to log the target.</div>` : ""}
     <div class="card">
       <div class="row"><div class="name">${esc(displayName)}</div><span class="pill">${timed ? `${pres.setsCount}× hold` : targetLabel(ex)}</span></div>
       ${ex.ladder ? `<div class="tiny muted" style="margin:-2px 0 4px">${esc(ex.name)}${timed ? " · timed hold" : ""}</div>` : ""}
@@ -1248,8 +1265,13 @@ function finishRun() {
     const advance = isTimedVariation(ex.ladder[r]) ? top >= 45 : (top >= ex.target.hi && clearedRpe);
     if (advance) { S.ladders[e.exId] = r + 1; leveled.push(ex.ladder[r + 1].replace(/\s*\(time\)/i, "")); }
   });
-  S.workouts.push({ id: Date.now(), date: today(), sessionKey: RUN.key, entries, note: "", _m: Date.now() });
-  S.programIndex = (SESSION_ORDER.indexOf(RUN.key) + 1) % SESSION_ORDER.length;
+  const date = RUN.date || today();
+  const note = RUN.date ? "Backdated manual entry" : "";
+  insertWorkoutSorted({ id: Date.now(), date, sessionKey: RUN.key, entries, note, _m: Date.now() });
+  // Rotation follows the most recently DATED workout, not just the one just saved —
+  // so backdating an earlier missed session doesn't undo progress made after it.
+  const latest = S.workouts[S.workouts.length - 1];
+  S.programIndex = (SESSION_ORDER.indexOf(latest.sessionKey) + 1) % SESSION_ORDER.length;
   S._m = Date.now();
   save();
   stopRest();
@@ -1661,6 +1683,15 @@ function renderMore() {
       ${SY.key ? `<button class="btn ghost" id="sync-off" style="margin-top:8px">Disconnect this device</button>` : ""}
       <div class="tiny muted" style="margin-top:10px">Use the same passphrase on each device to share data. Anyone with it can read your log, so make it long. Data syncs on open, on change, and when you return to the app.</div>
     </div>
+    <div class="blk-title"><span class="dot"></span>Log a past session</div>
+    <div class="card">
+      <div class="small muted">Trained but it never saved, or forgot to log same-day? Pick the date and which session it was — it opens the normal guided runner backdated to that day.</div>
+      <label class="fld" style="margin-top:12px"><span class="lt">Date</span>
+        <input id="bd-date" type="date" max="${esc(today())}" value="${esc(yesterday())}"/></label>
+      <div class="row" style="gap:8px;margin-top:10px">
+        ${SESSION_ORDER.map((k) => `<button class="btn ghost" style="flex:1" data-bd-sess="${k}">${esc(k)}</button>`).join("")}
+      </div>
+    </div>
     <div class="blk-title"><span class="dot"></span>Weekly review export</div>
     <div class="card">
       <div class="small muted">Copies a summary of the week to paste back for re-tuning.</div>
@@ -1702,6 +1733,12 @@ function renderMore() {
 
   document.getElementById("open-review").onclick = () => renderReview();
   document.getElementById("open-help").onclick = () => renderHelp();
+  document.querySelectorAll("[data-bd-sess]").forEach((b) => b.onclick = () => {
+    const d = document.getElementById("bd-date").value;
+    if (!d) { toast("Pick a date first"); return; }
+    if (d > today()) { toast("Can't backdate to the future"); return; }
+    startRun(b.dataset.bdSess, d);
+  });
   document.getElementById("exp-copy").onclick = async () => {
     const md = buildExport();
     try { await navigator.clipboard.writeText(md); toast("Copied — paste to Claude"); }

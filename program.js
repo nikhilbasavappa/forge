@@ -225,7 +225,7 @@ const EXERCISES = {
     name: "Rower — Steady", cat: "cond", load: "cardio", target: { sets: 1, sec: 300 },
     equip: ["Rower"],
     setup: "Strap your feet in, grip the handle, sit tall at the catch.",
-    cue: "Easy-moderate pace for the set time. Log your METERS — beating your distance in the same time is how you get fitter. Legs → hips → arms; reverse on the return.",
+    cue: "Easy-moderate pace for the set time. Log your STROKE COUNT — beating your strokes in the same time is how you get fitter. Legs → hips → arms; reverse on the return.",
     q: "rowing machine technique pace"
   },
   row_intervals: {
