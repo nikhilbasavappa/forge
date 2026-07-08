@@ -1,5 +1,5 @@
 /* sw.js — offline app shell + buddy push. Bump CACHE when files change to force update. */
-const CACHE = "forge-v39";
+const CACHE = "forge-v40";
 const SYNC_BASE = "https://forge-sync.nikvbas.workers.dev";
 const ASSETS = [
   "./", "./index.html", "./styles.css", "./program.js", "./app.js",

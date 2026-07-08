@@ -46,6 +46,7 @@ function saveSync() { localStorage.setItem(SYNC_KEY, JSON.stringify(SY)); }
 function syncEndpoint() { return SY.url || SYNC_ENDPOINT; }
 let syncState = "off"; // off | syncing | ok | err | offline
 let syncMsg = "";
+let syncEmptyWarn = false; // true right after connecting to a passphrase with zero remote data — see sync-connect handler
 
 function setSyncStatus(s, msg) {
   syncState = s; syncMsg = msg || "";
@@ -1802,6 +1803,7 @@ function renderMore() {
     <div class="blk-title"><span class="dot"></span>Sync across devices</div>
     <div class="card">
       <div class="small muted" id="sync-status">${esc(syncStatusText())}</div>
+      ${syncEmptyWarn ? `<div class="banner warn"><div>No data found for this passphrase — it's either brand new, or there's a typo. The passphrase is matched exactly as typed (one wrong letter = a totally different, empty account). If you've synced before, double-check for a typo before logging fresh data here.</div></div>` : ""}
       <label class="fld"><span class="lt">Passphrase (same on every device)</span>
         <input id="sync-key" type="password" placeholder="8+ characters" value="${esc(SY.key || "")}"/></label>
       <button class="btn" id="sync-connect" style="margin-top:12px">${SY.key ? "Sync now" : "Connect & sync"}</button>
@@ -1901,14 +1903,20 @@ function renderMore() {
   document.getElementById("sync-connect").onclick = async () => {
     const k = document.getElementById("sync-key").value.trim();
     if (k.length < 8) { toast("Passphrase: 8+ characters"); return; }
+    const isNewKey = k !== SY.key;
     SY.key = k; SY.url = SY.url || SYNC_ENDPOINT; saveSync();
     await syncNow();
-    toast(syncState === "ok" ? "Synced" : "Sync: " + syncMsg);
+    // The passphrase is used as a literal storage key (no fuzzy match) — a typo silently
+    // creates a brand-new, empty account instead of erroring. Surface that with a persistent
+    // banner (a toast alone disappears in ~2s, too fast for something this consequential).
+    const empty = !S.workouts.length && !S.checkins.length && !S.measurements.length && !(S.activity || []).length;
+    syncEmptyWarn = syncState === "ok" && isNewKey && empty;
+    toast(syncState === "ok" ? (syncEmptyWarn ? "Connected — but no data found" : "Synced") : "Sync: " + syncMsg);
     renderMore();
   };
   const offBtn = document.getElementById("sync-off");
   if (offBtn) offBtn.onclick = () => {
-    SY = { url: SY.url }; saveSync(); setSyncStatus("off"); toast("Disconnected"); renderMore();
+    SY = { url: SY.url }; saveSync(); setSyncStatus("off"); syncEmptyWarn = false; toast("Disconnected"); renderMore();
   };
   document.querySelectorAll("#equip-flags .flagbtn").forEach((b) => b.onclick = () => {
     S.equipment[b.dataset.equip] = !S.equipment[b.dataset.equip];
