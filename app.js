@@ -11,6 +11,7 @@ const DEFAULT_STATE = {
   measurements: [],       // {date, weight, waist, chest, arm}
   nutrition: [],          // {date, protein(g), _m}
   walks: [],              // {date, min, _m}
+  activity: [],           // {id, date, type:'prehab'|'mobility', title, entries:[{exId, variation, sets}], _m} — off-day rehab/mobility, logged separately from real sessions
   equipment: { dumbbells: false, suspension: false }, // bands + pull-up bar + rower assumed
   swaps: {},              // exId -> replacement exId (persistent)
   ladders: {},            // exId -> current rung index (which variation the app has assigned)
@@ -28,6 +29,7 @@ function load() {
     s.profile = Object.assign({}, DEFAULT_STATE.profile, s.profile); // backfill new profile fields
     if (!Array.isArray(s.nutrition)) s.nutrition = [];
     if (!Array.isArray(s.walks)) s.walks = [];
+    if (!Array.isArray(s.activity)) s.activity = [];
     s.equipment = Object.assign({}, DEFAULT_STATE.equipment, s.equipment);
     if (!s.swaps || typeof s.swaps !== "object") s.swaps = {};
     if (!s.ladders || typeof s.ladders !== "object") s.ladders = {};
@@ -93,6 +95,9 @@ function mergeStates(a, b) {
   out.measurements = mergeByKey(a.measurements, b.measurements, "date");
   out.nutrition = mergeByKey(a.nutrition, b.nutrition, "date");
   out.walks = mergeByKey(a.walks, b.walks, "date");
+  const ac = {};
+  [...(a.activity || []), ...(b.activity || [])].forEach((x) => { const e = ac[x.id]; if (!e || (x._m || 0) >= (e._m || 0)) ac[x.id] = x; });
+  out.activity = Object.values(ac).sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : x.id - y.id));
   if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.programIndex = b.programIndex; out.equipment = b.equipment; out.swaps = b.swaps; out.ladders = b.ladders; out.deloadWeek = b.deloadWeek; out._m = b._m; }
   return out;
 }
@@ -421,12 +426,28 @@ function insertWorkoutSorted(w) {
   while (i > 0 && S.workouts[i - 1].date > w.date) i--;
   S.workouts.splice(i, 0, w);
 }
+function insertActivitySorted(a) {
+  let i = S.activity.length;
+  while (i > 0 && S.activity[i - 1].date > a.date) i--;
+  S.activity.splice(i, 0, a);
+}
+// Looks across real sessions AND off-day prehab/mobility — an exercise done on a rest day
+// still sets the bar for "last time" and still feeds progression next time it's prescribed.
 function lastEntry(exId) {
+  let best = null;
   for (let i = S.workouts.length - 1; i >= 0; i--) {
     const e = S.workouts[i].entries.find((x) => x.exId === exId);
-    if (e) return { date: S.workouts[i].date, entry: e };
+    if (e) { best = { date: S.workouts[i].date, m: S.workouts[i]._m || 0, entry: e }; break; }
   }
-  return null;
+  for (let i = (S.activity || []).length - 1; i >= 0; i--) {
+    const e = S.activity[i].entries.find((x) => x.exId === exId);
+    if (e) {
+      const cand = { date: S.activity[i].date, m: S.activity[i]._m || 0, entry: e };
+      if (!best || cand.date > best.date || (cand.date === best.date && cand.m > best.m)) best = cand;
+      break;
+    }
+  }
+  return best;
 }
 function todaysCheckin() { return S.checkins.find((c) => c.date === today()) || null; }
 
@@ -529,6 +550,7 @@ function weeklySessions(n) {
   return out;
 }
 function sessionsThisWeek() { const k = weekStartStr(new Date()); return S.workouts.filter((w) => weekStartStr(new Date(w.date.replace(/-/g, "/"))) === k).length; }
+function activityThisWeek() { const k = weekStartStr(new Date()); return (S.activity || []).filter((a) => weekStartStr(new Date(a.date.replace(/-/g, "/"))) === k).length; }
 function targetStreakWeeks() {
   const tgt = S.profile.weeklyTarget || 4;
   const wk = weeklySessions(16);
@@ -765,6 +787,8 @@ function renderToday() {
   const title = sess.name.replace(/^[A-C] · /, "");
   const sw = sessionsThisWeek(), wt = S.profile.weeklyTarget || 4;
   const weekPill = `<span class="pill ${sw >= wt ? "good" : "acc"}">Week ${sw}/${wt}</span>`;
+  const actWk = activityThisWeek();
+  const actPill = actWk ? `<span class="pill">+${actWk} rehab/mobility</span>` : "";
   const lastW = S.workouts[S.workouts.length - 1];
   const whyText = lastW
     ? `Why ${key}? Last trained ${lastW.sessionKey} · ${daysAgo(lastW.date)}d ago — ${key} is next in your A/B/C rotation. It advances each time you finish a session.`
@@ -782,7 +806,7 @@ function renderToday() {
           <div class="mast-focus">${esc(sess.focus)}</div>
         </div>
       </div>
-      <div class="mast-meta">${rdPill}${readinessTags}${weekPill}</div>
+      <div class="mast-meta">${rdPill}${readinessTags}${weekPill}${actPill}</div>
       <div class="why">${esc(whyText)}</div>
       <button class="btn good" id="start-log" style="margin-top:18px">${RUN ? `Resume session — exercise ${RUN.idx + 1}/${RUN.list.length} →` : "Start &amp; log session →"}</button>
       ${ci ? "" : `<div class="tip">No check-in — targets are estimated from your recent training. Check in to fine-tune.</div>`}
@@ -1093,14 +1117,16 @@ function renderExercise(exId) {
   TITLE.textContent = ex.name;
   SUB.textContent = "History · best sets";
   const hist = [];
-  S.workouts.forEach((w) => { const e = w.entries.find((x) => x.exId === exId); if (e) hist.push({ date: w.date, sets: e.sets, variation: e.variation }); });
+  S.workouts.forEach((w) => { const e = w.entries.find((x) => x.exId === exId); if (e) hist.push({ date: w.date, m: w._m || 0, sets: e.sets, variation: e.variation }); });
+  (S.activity || []).forEach((a) => { const e = a.entries.find((x) => x.exId === exId); if (e) hist.push({ date: a.date, m: a._m || 0, sets: e.sets, variation: e.variation, tag: a.type }); });
+  hist.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.m - b.m));
   const pts = [];
   hist.forEach((h) => { const top = Math.max(0, ...h.sets.map((s) => +s.reps || 0)); if (top) pts.push({ x: pts.length, y: top }); });
   let pr = null;
   hist.forEach((h) => h.sets.forEach((s) => { const r = +s.reps || 0; if (r && (!pr || r > pr.reps)) pr = { reps: r, load: s.load }; }));
   const rows = hist.slice().reverse().map((h) => {
     const sets = h.sets.map((s) => `${s.reps ?? "?"}${s.load ? "@" + s.load : ""}${s.rpe ? " (RPE" + s.rpe + ")" : ""}`).join(", ");
-    return `<div class="row small" style="padding:8px 0;border-top:1px solid var(--line)"><span class="muted">${prettyDate(h.date)}${h.variation ? " · " + esc(h.variation) : ""}</span><span>${esc(sets)}</span></div>`;
+    return `<div class="row small" style="padding:8px 0;border-top:1px solid var(--line)"><span class="muted">${prettyDate(h.date)}${h.variation ? " · " + esc(h.variation) : ""}${h.tag ? ` · ${esc(h.tag)}` : ""}</span><span>${esc(sets)}</span></div>`;
   }).join("");
   VIEW.innerHTML = `
     <button class="btn ghost sm" id="ex-back" style="margin:8px 0 6px">← Back</button>
@@ -1156,6 +1182,9 @@ function renderReview() {
   const sleepV = wkC.filter((c) => c.sleep != null);
   const sleepAvg = sleepV.length ? (sleepV.reduce((s, c) => s + (+c.sleep), 0) / sleepV.length).toFixed(1) : null;
   const alcNights = wkC.filter((c) => c.flags && c.flags.alcohol).length;
+  const wkAct = (S.activity || []).filter((a) => inWeek(a.date));
+  const prehabN = wkAct.filter((a) => a.type === "prehab").length;
+  const mobilityN = wkAct.filter((a) => a.type === "mobility").length;
 
   const row = (label, val) => `<div class="row small" style="padding:9px 0;border-top:1px solid var(--line)"><span class="muted">${label}</span><span>${val}</span></div>`;
   VIEW.innerHTML = `
@@ -1178,6 +1207,11 @@ function renderReview() {
       ${row("Walking", walkAvg != null ? `${walkAvg} min/day · ${wkW.length} days${inclineAvg != null ? ` · incline ${inclineAvg}/12 avg` : ""}` : "not logged")}
       ${row("Sleep", sleepAvg != null ? `${sleepAvg} h avg` : "not logged")}
       ${row("Alcohol", `${alcNights} night${alcNights === 1 ? "" : "s"}`)}
+    </div>
+    <div class="blk-title"><span class="dot"></span>Recovery work</div>
+    <div class="card tight">
+      ${row("Prehab", `${prehabN} session${prehabN === 1 ? "" : "s"}`)}
+      ${row("Mobility", `${mobilityN} session${mobilityN === 1 ? "" : "s"}`)}
     </div>
     <div class="blk-title"><span class="dot"></span>Sessions this week</div>
     <div class="card tight">${wkWorkouts.length ? wkWorkouts.map((w) => `<div class="row small" style="padding:7px 0;border-top:1px solid var(--line)"><span class="muted">${prettyDate(w.date)}</span><span>${esc((SESSIONS[w.sessionKey] || {}).name || w.sessionKey)}</span></div>`).join("") : `<div class="tiny muted">No sessions logged yet this week.</div>`}</div>
@@ -1249,8 +1283,7 @@ function renderHelp() {
   document.getElementById("hp-back").onclick = () => setTab("more");
 }
 
-function finishRun() {
-  if (RUN.isPrehab) { const t = RUN.title || "Prehab"; stopRest(); RUN = null; saveRun(); toast(t + " done"); setTab("today"); return; }
+function collectRunEntries() {
   const entries = Object.entries(RUN.data).map(([exId, sets]) => {
     const variation = sets.variation;
     const clean = sets.filter((s) => s && (s.reps != null || s.load != null || s.dist != null))
@@ -1272,8 +1305,11 @@ function finishRun() {
       entries.push(e);
     });
   }
-  if (!entries.length) { toast("Mark a set done (tap its number) so it saves"); return; }
-  // auto-advance progression rungs when the criterion is met
+  return entries;
+}
+// auto-advance progression rungs when the criterion is met — applies during real sessions
+// AND off-day prehab/mobility, since e.g. dead hang is a mobility-only move with its own ladder.
+function advanceLadders(entries) {
   const leveled = [];
   entries.forEach((e) => {
     const ex = EXERCISES[e.exId];
@@ -1285,7 +1321,26 @@ function finishRun() {
     const advance = isTimedVariation(ex.ladder[r]) ? top >= 45 : (top >= ex.target.hi && clearedRpe);
     if (advance) { S.ladders[e.exId] = r + 1; leveled.push(ex.ladder[r + 1].replace(/\s*\(time\)/i, "")); }
   });
+  return leveled;
+}
+function finishRun() {
+  const entries = collectRunEntries();
+  if (!entries.length) { toast("Mark a set done (tap its number) so it saves"); return; }
+  const leveled = advanceLadders(entries);
   const date = RUN.date || today();
+  if (RUN.isPrehab) {
+    const type = RUN.key === "Mobility" ? "mobility" : "prehab";
+    const title = RUN.title || RUN.key;
+    insertActivitySorted({ id: Date.now(), date, type, title, entries, _m: Date.now() });
+    S._m = Date.now();
+    save();
+    stopRest();
+    RUN = null;
+    saveRun();
+    toast(leveled.length ? `Leveled up → ${leveled[0]}` : `${title} logged`);
+    setTab("today");
+    return;
+  }
   const note = RUN.date ? "Backdated manual entry" : "";
   insertWorkoutSorted({ id: Date.now(), date, sessionKey: RUN.key, entries, note, _m: Date.now() });
   // Rotation follows the most recently DATED workout, not just the one just saved —
@@ -1664,8 +1719,24 @@ function buildExport() {
     });
     if (w.note) md += `  _note: ${w.note}_\n`;
   });
+  const recentAct = (S.activity || []).filter((a) => daysAgo(a.date) <= cutoff);
+  if (recentAct.length) {
+    md += `\n## Recovery work (last week)\n`;
+    recentAct.forEach((a) => {
+      md += `\n**${a.date} — ${a.title}**\n`;
+      a.entries.forEach((e) => {
+        const ex = EXERCISES[e.exId];
+        const sets = e.sets.map((s) => `${s.reps ?? "?"}${s.load ? "@" + s.load : ""}`).join(", ");
+        md += `- ${ex.name}${e.variation ? ` [${e.variation}]` : ""}: ${sets}\n`;
+      });
+    });
+  }
   md += `\n## Adherence & nutrition\n`;
   md += `- This week: ${sessionsThisWeek()}/${S.profile.weeklyTarget} sessions, ${targetStreakWeeks()} wk on-target streak\n`;
+  if (recentAct.length) {
+    const pN = recentAct.filter((a) => a.type === "prehab").length, mN = recentAct.filter((a) => a.type === "mobility").length;
+    md += `- Recovery work: ${pN} prehab + ${mN} mobility session(s) over the last week\n`;
+  }
   const recentN = S.nutrition.filter((n) => daysAgo(n.date) <= 8 && n.protein != null);
   if (recentN.length) {
     const avg = Math.round(recentN.reduce((s, n) => s + (+n.protein || 0), 0) / recentN.length);
