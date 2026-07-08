@@ -318,18 +318,36 @@ function isStalled(exId, ex) {
   return Math.max(...w.map((s) => s.top)) <= w[0].top; // no new high across 3 sessions
 }
 // Blended daily readiness 0–100 from energy, sleep, quality, pain, accumulated fatigue.
+// Average RPE across the most recent logged session — an implicit fatigue signal.
+function recentAvgRpe() {
+  const w = S.workouts[S.workouts.length - 1];
+  if (!w) return null;
+  const rs = [];
+  w.entries.forEach((e) => e.sets.forEach((s) => { if (s.rpe) rs.push(+s.rpe); }));
+  return rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : null;
+}
 function readiness() {
   const ci = todaysCheckin();
-  if (!ci || !ci.energy) return null;
-  let s = 60 + (ci.energy - 3) * 12;
-  if (ci.sleep != null) s += Math.max(-24, Math.min(8, (ci.sleep - 7) * 6));
-  if (ci.sleepQuality) s += (ci.sleepQuality - 3) * 6;
-  (ci.pains || []).forEach((p) => { s -= (p.sev || 0) * (/scapula|shoulder/i.test(p.area) ? 9 : 6); });
+  let s, implicit = false;
+  if (ci && ci.energy) {
+    s = 60 + (ci.energy - 3) * 12;
+    if (ci.sleep != null) s += Math.max(-24, Math.min(8, (ci.sleep - 7) * 6));
+    if (ci.sleepQuality) s += (ci.sleepQuality - 3) * 6;
+    (ci.pains || []).forEach((p) => { s -= (p.sev || 0) * (/scapula|shoulder/i.test(p.area) ? 9 : 6); });
+  } else {
+    // No check-in — infer readiness from training-load signals so targets still adapt.
+    implicit = true;
+    s = 66; // neutral baseline
+    const rpe = recentAvgRpe();
+    if (rpe) s += Math.max(-12, Math.min(10, (8 - rpe) * 5)); // brutal last session -> lower
+    const dsl = daysSinceLastWorkout();
+    if (dsl != null) { if (dsl >= 3) s += 6; else if (dsl === 0) s -= 4; } // rested up vs. back-to-back
+  }
   const consec = consecutiveTrainingDays();
   if (consec >= 4) s -= (consec - 3) * 6;
   s = Math.max(0, Math.min(100, Math.round(s)));
   const band = s >= 75 ? "primed" : s >= 58 ? "ready" : s >= 44 ? "moderate" : "low";
-  return { score: s, band };
+  return { score: s, band, implicit };
 }
 
 function pace500(distM, timeSec) {
@@ -655,6 +673,43 @@ function demoLink(ex) {
   const url = "https://www.youtube.com/results?search_query=" + encodeURIComponent(ex.q);
   return `<a class="lnk demo" href="${url}" target="_blank" rel="noopener">Demo ↗</a>`;
 }
+function equipList(ex) { return (ex && Array.isArray(ex.equip)) ? ex.equip.slice() : []; }
+function equipLine(ex) {
+  const eq = equipList(ex);
+  if (!eq.length) return "";
+  return `<div class="equipline"><span class="eqk">Equipment</span>${eq.map((e) => `<span class="eqchip">${esc(e)}</span>`).join("")}</div>`;
+}
+function setupLine(ex) {
+  if (!ex || !ex.setup) return "";
+  return `<div class="setupline"><span class="eqk">Setup</span><span class="eqv">${esc(ex.setup)}</span></div>`;
+}
+// All equipment the (resolved, swap-aware) session needs today — deduped, order-preserved.
+function sessionEquip(key) {
+  const out = [];
+  for (const blk of SESSIONS[key].blocks)
+    for (const rawId of blk.ex) {
+      const ex = EXERCISES[resolveEx(rawId)];
+      for (const e of equipList(ex)) if (!out.includes(e)) out.push(e);
+    }
+  return out;
+}
+// Data-completeness check (the honest version of a post-generation validation pass for a fixed deck).
+function validateProgram() {
+  const seen = new Set(), problems = [];
+  for (const key of SESSION_ORDER)
+    for (const blk of SESSIONS[key].blocks)
+      for (const rawId of blk.ex) { seen.add(rawId); seen.add(resolveEx(rawId)); (ALTS[rawId] || []).forEach((a) => seen.add(a)); }
+  for (const id of seen) {
+    const ex = EXERCISES[id];
+    if (!ex) { problems.push(`${id}: missing from EXERCISES`); continue; }
+    if (!equipList(ex).length) problems.push(`${id}: no equip[]`);
+    if (!ex.setup) problems.push(`${id}: no setup`);
+    if (!ex.q) problems.push(`${id}: no demo query`);
+    if (!(ALTS[id] || []).length && ex.cat !== "cond") problems.push(`${id}: no swap alternatives`);
+  }
+  if (problems.length) console.warn("[Forge] program validation:", problems);
+  return problems;
+}
 function lastLabel(exId) {
   const l = lastEntry(exId);
   if (!l) return null;
@@ -680,7 +735,7 @@ function renderToday() {
   SUB.textContent = prettyDate(today());
 
   const rd = readiness();
-  const rdPill = rd ? `<span class="pill ${rd.band === "low" ? "warn" : rd.band === "primed" ? "good" : "acc"}">Readiness ${rd.score} · ${rd.band}</span>` : "";
+  const rdPill = `<span class="pill ${rd.band === "low" ? "warn" : rd.band === "primed" ? "good" : "acc"}">Readiness ${rd.score}${rd.implicit ? " est" : ""} · ${rd.band}</span>`;
   const readinessTags = ci
     ? `<span class="pill ${ci.energy >= 4 ? "good" : ci.energy <= 2 ? "warn" : "acc"}">Energy ${ci.energy}/5</span>
        <span class="pill">Sleep ${ci.sleep ?? "–"}h</span>
@@ -690,6 +745,10 @@ function renderToday() {
   const title = sess.name.replace(/^[A-C] · /, "");
   const sw = sessionsThisWeek(), wt = S.profile.weeklyTarget || 4;
   const weekPill = `<span class="pill ${sw >= wt ? "good" : "acc"}">Week ${sw}/${wt}</span>`;
+  const lastW = S.workouts[S.workouts.length - 1];
+  const whyText = lastW
+    ? `Why ${key}? Last trained ${lastW.sessionKey} · ${daysAgo(lastW.date)}d ago — ${key} is next in your A/B/C rotation. It advances each time you finish a session.`
+    : `Why ${key}? Nothing logged yet, so you're at the start of the rotation and targets are baseline. Finish a session to advance the letter and start adapting.`;
   let html = `
     <div class="masthead">
       <div class="mast-top">
@@ -704,9 +763,19 @@ function renderToday() {
         </div>
       </div>
       <div class="mast-meta">${rdPill}${readinessTags}${weekPill}</div>
+      <div class="why">${esc(whyText)}</div>
       <button class="btn good" id="start-log" style="margin-top:18px">${RUN ? `Resume session — exercise ${RUN.idx + 1}/${RUN.list.length} →` : "Start &amp; log session →"}</button>
-      ${ci ? "" : `<div class="tip">Check in first to adjust today's targets.</div>`}
+      ${ci ? "" : `<div class="tip">No check-in — targets are estimated from your recent training. Check in to fine-tune.</div>`}
     </div>`;
+
+  // Today's equipment — everything this session needs, so nothing is a surprise mid-workout.
+  const todayEquip = sessionEquip(key);
+  if (todayEquip.length) {
+    html += `<div class="equipsum">
+      <span class="eqk">Today's equipment</span>
+      <div class="eqchips">${todayEquip.map((e) => `<span class="eqchip">${esc(e)}</span>`).join("")}</div>
+    </div>`;
+  }
 
   // deload banner + smart nudges
   const consec = consecutiveTrainingDays();
@@ -871,7 +940,9 @@ function renderRunner() {
       <div class="row"><div class="name">${esc(displayName)}</div><span class="pill">${timed ? `${pres.setsCount}× hold` : targetLabel(ex)}</span></div>
       ${ex.ladder ? `<div class="tiny muted" style="margin:-2px 0 4px">${esc(ex.name)}${timed ? " · timed hold" : ""}</div>` : ""}
       <div class="cue">${esc(ex.ladder && timed ? "Hold with good form as long as you can — no reps. Tap ‘time it’ to run the clock." : ex.cue)}</div>
+      ${equipLine(ex)}${setupLine(ex)}
       <div class="meta"><span class="pill ${prescribeLvl(pres)}">${esc(pres.note)}</span>${demoLink(ex)}<button class="linkbtn" id="run-swap">Swap →</button></div>
+      ${lastLabel(exId) ? `<div class="lastnote">${esc(lastLabel(exId))} → aim to beat it</div>` : ""}
       ${ladderCtl}
       <div class="sets">${rows}</div>
     </div>
@@ -900,40 +971,86 @@ function renderRunner() {
 }
 
 function captureRun(exId) {
+  const ex = EXERCISES[exId];
+  const pres = ex ? prescribe(exId) : null;
   const sets = [];
   document.querySelectorAll(".sets .setrow").forEach((row) => {
     const reps = row.querySelector('[data-f="reps"]'), load = row.querySelector('[data-f="load"]'), dist = row.querySelector('[data-f="dist"]'), rpe = row.querySelector('[data-f="rpe"]');
     const i = +reps.dataset.set;
+    const done = row.querySelector(".setdone")?.classList.contains("on") || false;
+    let repsNum = reps.value.trim() === "" ? null : Number(reps.value);
+    // A "done"-marked set with no typed number logs the prescribed target — tapping done = "I did this set".
+    if (repsNum == null && done && pres && pres.perSet[i] && pres.perSet[i].reps != null) repsNum = pres.perSet[i].reps;
     sets[i] = {
-      reps: reps.value.trim() === "" ? null : Number(reps.value),
+      reps: repsNum,
       load: load && load.value != null && load.value.trim() !== "" ? load.value.trim() : null,
       dist: dist && dist.value.trim() !== "" ? Number(dist.value) : null,
       unit: null,
       rpe: rpe.value === "" ? null : Number(rpe.value),
-      done: row.querySelector(".setdone")?.classList.contains("on") || false,
+      done,
     };
   });
   RUN.data[exId] = sets;
-  const ex = EXERCISES[exId];
   if (ex && ex.ladder) RUN.data[exId].variation = assignedVariation(exId);
   saveRun();
 }
 
 function renderSwapPanel(exId) {
-  const alts = (typeof ALTS !== "undefined" && ALTS[exId]) || [];
   const panel = document.getElementById("swap-panel");
-  if (!alts.length) { panel.innerHTML = `<div class="card tight tiny muted">No alternatives for this one.</div>`; return; }
-  panel.innerHTML = `<div class="card"><div class="lt">Swap to</div>${
-    alts.map((a) => `<button class="btn ghost" style="margin-top:8px" data-swap="${a}">${esc(EXERCISES[a].name)}</button>`).join("")
-  }<div class="tiny muted" style="margin-top:8px">Sticks for future sessions. Undo in More → Equipment.</div></div>`;
-  panel.querySelectorAll("[data-swap]").forEach((b) => b.onclick = () => {
-    const cur = RUN.list[RUN.idx];
-    const origId = exFlat(RUN.key).find((o) => resolveEx(o) === cur) || cur;
-    S.swaps[origId] = b.dataset.swap; S._m = Date.now(); save();
-    RUN.list[RUN.idx] = b.dataset.swap;
-    saveRun();
-    renderRunner();
-  });
+  panel.innerHTML = `<div class="card">
+    <div class="lt">Why swap?</div>
+    <div class="reasons">
+      <button class="btn ghost" data-reason="equip">I don't have the equipment</button>
+      <button class="btn ghost" data-reason="hurt">This hurts</button>
+      <button class="btn ghost" data-reason="hard">Too hard</button>
+      <button class="btn ghost" data-reason="easy">Too easy</button>
+      <button class="btn ghost" data-reason="how">I don't know how</button>
+    </div>
+    <div id="swap-result"></div>
+  </div>`;
+  panel.querySelectorAll("[data-reason]").forEach((b) => b.onclick = () => swapReason(exId, b.dataset.reason));
+}
+function swapReason(exId, reason) {
+  const res = document.getElementById("swap-result");
+  const ex = EXERCISES[exId];
+  if (reason === "how") {
+    res.innerHTML = `<div class="howto">
+      ${equipLine(ex)}${setupLine(ex)}
+      <div class="cue" style="margin-top:6px">${esc(ex.cue)}</div>
+      <div style="margin-top:8px">${demoLink(ex) || `<span class="tiny muted">No video — follow the setup above.</span>`}</div>
+      <div class="tiny muted" style="margin-top:6px">Not swapped. Do it as described, or pick another reason.</div>
+    </div>`;
+    return;
+  }
+  if ((reason === "hard" || reason === "easy") && ex.ladder) {
+    const r = assignedRung(exId);
+    const atEnd = reason === "hard" ? r === 0 : r >= ex.ladder.length - 1;
+    if (atEnd) {
+      res.innerHTML = `<div class="tiny muted" style="margin:8px 0">Already the ${reason === "hard" ? "easiest" : "hardest"} variation — swapping the movement instead.</div>`;
+      return swapAltList(exId, reason);
+    }
+    captureRun(exId); setRung(exId, reason === "hard" ? r - 1 : r + 1); renderRunner(); return;
+  }
+  swapAltList(exId, reason);
+}
+function swapAltList(exId, reason) {
+  const res = document.getElementById("swap-result");
+  let alts = ((typeof ALTS !== "undefined" && ALTS[exId]) || []).slice();
+  if (reason === "equip") {
+    const gearFree = (id) => !equipList(EXERCISES[id]).some((e) => /band|dumbbell|suspension/i.test(e));
+    alts.sort((a, b) => (gearFree(b) ? 1 : 0) - (gearFree(a) ? 1 : 0));
+  }
+  if (!alts.length) { res.innerHTML = `<div class="tiny muted" style="margin-top:8px">No same-pattern alternative for this one. Try adjusting the difficulty, or skip it.</div>`; return; }
+  res.innerHTML = `<div class="lt" style="margin-top:12px">Same movement, swap to</div>${
+    alts.map((a) => { const e = EXERCISES[a]; return `<button class="btn ghost swapopt" data-swap="${a}"><span>${esc(e.name)}</span><span class="tiny muted">${esc(equipList(e).join(", ") || "no equipment")}</span></button>`; }).join("")
+  }<div class="tiny muted" style="margin-top:8px">Sticks for future sessions. Undo in More → Equipment.</div>`;
+  res.querySelectorAll("[data-swap]").forEach((b) => b.onclick = () => applySwap(b.dataset.swap));
+}
+function applySwap(altId) {
+  const cur = RUN.list[RUN.idx];
+  const origId = exFlat(RUN.key).find((o) => resolveEx(o) === cur) || cur;
+  S.swaps[origId] = altId; S._m = Date.now(); save();
+  RUN.list[RUN.idx] = altId; saveRun(); renderRunner();
 }
 
 function renderExercise(exId) {
@@ -1105,7 +1222,20 @@ function finishRun() {
     if (variation) e.variation = variation;
     return e;
   }).filter((e) => e.sets.length);
-  if (!entries.length) { toast("Log at least one set"); return; }
+  // Safety net: reached exercises with nothing typed/marked still count at their prescribed target,
+  // so "Finish & save" never silently no-ops just because you tapped through without logging.
+  if (!entries.length) {
+    Object.keys(RUN.data).forEach((exId) => {
+      const ex = EXERCISES[exId]; if (!ex) return;
+      const pres = prescribe(exId);
+      const sets = pres.perSet.map((p) => ({ reps: p.reps ?? null, load: p.load ?? null, unit: null, rpe: null })).filter((s) => s.reps != null);
+      if (!sets.length) return;
+      const e = { exId, sets };
+      if (ex.ladder) e.variation = assignedVariation(exId);
+      entries.push(e);
+    });
+  }
+  if (!entries.length) { toast("Mark a set done (tap its number) so it saves"); return; }
   // auto-advance progression rungs when the criterion is met
   const leveled = [];
   entries.forEach((e) => {
@@ -1635,6 +1765,7 @@ function renderMore() {
 }
 
 /* ---------- boot ---------- */
+try { validateProgram(); } catch (e) {}
 if (RUN) { current = "today"; renderRunner(); } else { setTab("today"); }
 if (SY.key) syncNow({ rerender: true });
 window.addEventListener("online", () => syncNow({ rerender: true }));

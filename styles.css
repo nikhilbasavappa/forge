@@ -95,6 +95,8 @@ h2.sec, .blk-title {
 .mast-meta { display: flex; gap: 7px; flex-wrap: wrap; margin: 16px 0 0; }
 .tip { font-family: var(--m); font-size: 0.7rem; color: var(--mut); margin-top: 12px;
   text-transform: uppercase; letter-spacing: 0.08em; }
+.why { font-size: 0.82rem; line-height: 1.5; color: var(--ink-2); margin-top: 14px;
+  padding-top: 12px; border-top: 1px solid var(--line); max-width: 56ch; }
 
 /* ---- exercise rows ---- */
 .ex { padding: 16px 0; border-top: 1px solid var(--line); }
@@ -106,6 +108,27 @@ h2.sec, .blk-title {
   font-family: var(--m); font-size: 0.74rem; color: var(--mut); margin-top: 8px;
   letter-spacing: 0.02em;
 }
+
+/* ---- equipment + setup ---- */
+.eqk {
+  font-family: var(--m); font-size: 0.62rem; text-transform: uppercase;
+  letter-spacing: 0.12em; color: var(--mut); display: inline-block;
+}
+.equipline { margin-top: 9px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.eqchip {
+  display: inline-block; font-family: var(--m); font-size: 0.68rem;
+  letter-spacing: 0.03em; color: var(--ink); border: 1px solid var(--line-2);
+  padding: 3px 7px; background: none; white-space: nowrap;
+}
+.setupline { margin-top: 7px; font-size: 0.86rem; line-height: 1.5; color: var(--ink-2); max-width: 52ch; }
+.setupline .eqk { margin-right: 6px; }
+.setupline .eqv { }
+.equipsum { margin-top: 14px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.equipsum .eqchips { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 8px; }
+.reasons { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.reasons .btn { text-align: left; }
+.swapopt { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 8px; text-align: left; }
+.howto { margin-top: 10px; }
 
 /* ---- tags (was pills) ---- */
 .pill {
