@@ -381,6 +381,17 @@ const MUSCLE_POOLS = (() => {
   for (const [id, ex] of Object.entries(EXERCISES)) if (ex.muscle) (pools[ex.muscle] = pools[ex.muscle] || []).push(id);
   return pools;
 })();
+// Most bodyweight-mode swap targets (chin-ups, floor rows, split-stance work) are genuinely
+// different movements worth keeping in rotation regardless of equipment. Backpack Curl is the
+// one exception — it's not a distinct movement, it's the same curl as hammer_curl with a
+// backpack standing in for a dumbbell, so it only earns a slot when there's no real weight
+// to use. Once you're not in bodyweight mode, drop it from the pool.
+const EQUIP_SUBSTITUTE_ONLY = new Set(["backpack_curl"]);
+function equipFilteredPool(pool) {
+  if (isBodyweightMode()) return pool;
+  const filtered = pool.filter((id) => !EQUIP_SUBSTITUTE_ONLY.has(id));
+  return filtered.length ? filtered : pool;
+}
 function daysSinceExercise(exId) {
   const l = lastEntry(exId);
   return l ? daysAgo(l.date) : 999;
@@ -532,7 +543,7 @@ function generateSession() {
     chosenMuscles.push({ m, n, stalled });
     remaining -= n;
   });
-  const strengthEx = chosenMuscles.flatMap(({ m, n }) => pickLRU(MUSCLE_POOLS[m] || [], n));
+  const strengthEx = chosenMuscles.flatMap(({ m, n }) => pickLRU(equipFilteredPool(MUSCLE_POOLS[m] || []), n));
 
   chosenMuscles.slice(0, 2).forEach(({ m, n, stalled }) => {
     const d = daysSinceMuscle(m);
