@@ -659,10 +659,17 @@ function prescribe(exId) {
     perSet.forEach((p) => { p.addLoad = false; p.loadStepped = false; if (p.last != null) p.reps = p.last; });
     return { setsCount, perSet, note: "Deload — lighter, leave 2–3 reps in reserve" };
   }
+  // "Add load" only makes physical sense when a numeric load actually exists (dumbbells on,
+  // or a genuine weight-tracked movement). For a bodyweight exercise with no ladder either
+  // (prone row, bird dog, etc.) there's no mechanical way to progress difficulty in-app at
+  // all beyond more reps/sets — telling someone to "add load" to a bodyweight movement they
+  // have no external weight for is advice that can't actually be followed.
+  const hasLoadOption = ex.load === "band" || ex.load === "weight" || isNumericLoad(ex);
+  const harderText = ex.ladder ? "move up to a harder variation" : (hasLoadOption ? "add load" : "add tempo or pause reps");
   let note;
   if (rd && rd.band === "low") note = "Low readiness — one fewer set, but push the ones you do";
-  else if (mo) note = rd && rd.band === "primed" ? "Primed + cruising — add a set and load" : "Cruising — add load or a harder variation";
-  else if (anyAdd) note = steppedTo != null ? `Cleared the range — stepped up to ${steppedTo}lb` : "Cleared the range — add load this time";
+  else if (mo) note = rd && rd.band === "primed" ? `Primed + cruising — add a set and ${harderText}` : `Cruising — ${harderText}`;
+  else if (anyAdd) note = steppedTo != null ? `Cleared the range — stepped up to ${steppedTo}lb` : `Cleared the range — ${harderText}`;
   else note = ex.load === "time" ? "Beat last time's hold" : "Beat last time's reps";
   let finalSets = setsCount, finalPerSet = perSet;
   ({ setsCount: finalSets, perSet: finalPerSet } = applyVolumeFloor(finalSets, finalPerSet, ex));
@@ -715,7 +722,11 @@ function suggest(exId) {
   }
   if (isStalled(exId, ex)) return { lvl: "warn", text: "Stalled 3 sessions: swap or deload this lift" };
   if (rd && rd.band === "low") return { lvl: "warn", text: "Low readiness: cut sets, keep form" };
-  if (momentum(exId, ex)) return { lvl: "good", text: "Cruising: push load or harder variation" };
+  if (momentum(exId, ex)) {
+    const hasLoadOption = ex.load === "band" || ex.load === "weight" || isNumericLoad(ex);
+    const text = ex.ladder ? "Cruising: move up to a harder variation" : (hasLoadOption ? "Cruising: push load" : "Cruising: add tempo or pause reps");
+    return { lvl: "good", text };
+  }
   if (!last) return { lvl: "acc", text: "No history yet" };
 
   const sets = last.entry.sets.filter((s) => s.reps != null || s.load != null);
@@ -732,7 +743,10 @@ function suggest(exId) {
   // the earlier sets need to have stayed comfortable.
   const lowRpe = sets.slice(0, -1).every((s) => !s.rpe || s.rpe <= 8);
   if (allHit && lowRpe) {
-    return { lvl: "good", text: ex.ladder ? "Top of range: add load or variation" : "Top of range: +load or +1 rep/set" };
+    // A laddered bodyweight exercise never has a numeric load to add — only bands/weights do.
+    const hasLoadOption = ex.load === "band" || ex.load === "weight" || isNumericLoad(ex);
+    const text = ex.ladder ? "Top of range: move up to a harder variation" : (hasLoadOption ? "Top of range: +load or +1 rep/set" : "Top of range: +1 rep or +1 set");
+    return { lvl: "good", text };
   }
   if (topReps < ex.target.lo) return { lvl: "warn", text: `Below ${ex.target.lo} reps: hold or regress` };
   return { lvl: "acc", text: `Add reps toward ${ex.target.hi}` };
@@ -1265,7 +1279,11 @@ function renderRunner() {
     if (cardio) tgt = cardioTarget(exId, ex);
     else if (timed) tgt = p.last != null ? `hold — beat ${fmtDur(p.last)}` : "hold — hit ‘time it’ to run the timer";
     else {
-      tgt = `${p.reps}${p.loadStepped ? ` · stepped to ${p.load}lb (was ${p.prevLoad})` : (p.addLoad ? " +load" : "")}`;
+      // "+load" only makes sense when a numeric load exists to add to — a laddered bodyweight
+      // exercise (push-ups, pull-ups, squats) clears its range into a harder ladder rung, not
+      // a heavier weight it doesn't have.
+      const addLoadText = p.addLoad ? (ex.ladder ? " · clears to next rung" : " +load") : "";
+      tgt = `${p.reps}${p.loadStepped ? ` · stepped to ${p.load}lb (was ${p.prevLoad})` : addLoadText}`;
       // Effort guidance on real strength work — the number alone doesn't say how hard to push it,
       // and evidence points to proximity-to-failure mattering more than the exact rep count.
       if (ex.muscle) tgt += i === pres.setsCount - 1 ? " · last set: push close to failure" : " · leave ~2 in reserve";
