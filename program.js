@@ -27,6 +27,13 @@ const EXERCISES = {
     cue: "Low back flat to wall, ribs down. Slide arms overhead keeping wrists and elbows on the wall.",
     q: "scapular wall slides exercise"
   },
+  floor_slides: {
+    name: "Floor Slides", cat: "prehab", load: "reps", target: { sets: 2, lo: 8, hi: 12 },
+    equip: ["Floor"],
+    setup: "Lie on your back, knees bent feet flat, arms up in a goalpost, backs of the hands on the floor.",
+    cue: "Low back flat to the floor, ribs down. Slide arms overhead keeping wrists and elbows on the floor — same move as wall slides, floor is the flat reference instead of a wall. No wall contact needed.",
+    q: "floor slides shoulder exercise"
+  },
   band_pull_apart: {
     name: "Band Pull-Apart", cat: "pull", muscle: "rear_delts", load: "band", target: { sets: 3, lo: 12, hi: 20 },
     equip: ["Bands"],
@@ -395,9 +402,10 @@ const ALTS = {
   bird_dog: ["pallof", "dead_bug"],
   plank: ["hollow_hold", "dead_bug"],
   hollow_hold: ["plank", "dead_bug"],
-  wall_slides: ["scap_pushup"],
-  scap_pushup: ["wall_slides"],
-  thoracic_open: ["wall_slides"],
+  wall_slides: ["floor_slides", "scap_pushup"],
+  floor_slides: ["scap_pushup", "wall_slides"],
+  scap_pushup: ["floor_slides", "wall_slides"],
+  thoracic_open: ["floor_slides", "wall_slides"],
   row_steady: ["row_intervals"],
   row_intervals: ["row_steady"],
 };
