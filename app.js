@@ -501,6 +501,22 @@ function cardioTarget(exId, ex) {
   return `${fmtDur(ex.target.sec)} — log your strokes`;
 }
 
+// Safety net: a rep-based prescription under ~20 total reps isn't much of a stimulus
+// regardless of how many exercises make up the session. Adds sets (at the same target as the
+// last) rather than inflating any single set beyond the exercise's own range — loops because a
+// single extra set isn't always enough once readiness has already cut the starting count down.
+// Capped so a low-rep-ceiling movement (e.g. an early pull-up rung) can't balloon into 8+ sets.
+// Skipped for time/cardio work, which isn't measured in reps.
+function applyVolumeFloor(setsCount, perSet, ex) {
+  if (ex.load === "time" || ex.load === "cardio" || !perSet.length) return { setsCount, perSet };
+  const out = [...perSet];
+  let sets = setsCount, total = out.reduce((s, p) => s + (+p.reps || 0), 0), added = 0;
+  while (total < 20 && added < 3) {
+    const extra = { ...out[out.length - 1] };
+    out.push(extra); sets++; total += (+extra.reps || 0); added++;
+  }
+  return { setsCount: sets, perSet: out };
+}
 // Auto-progression: per-set targets scaled by readiness (both directions) + momentum.
 function prescribe(exId) {
   const ex = EXERCISES[exId];
@@ -518,11 +534,16 @@ function prescribe(exId) {
   else if (rd && rd.band === "primed" && mo && ex.load !== "time") setsCount = ex.target.sets + 1;
 
   if (!last) {
-    const base = ex.load === "time" ? ex.target.sec : ex.target.lo;
+    // Seed at the MIDPOINT of the rep range, not the bottom — the bottom is the easiest
+    // possible number in the range, not a real calibration attempt. Still self-corrects:
+    // clear it clean and next time's target moves toward the top.
+    const base = ex.load === "time" ? ex.target.sec : Math.round((ex.target.lo + ex.target.hi) / 2);
     const baseNote = ex.load === "time" ? "Baseline — see how long you can hold"
       : (ex.load === "reps" || !ex.load) ? "Baseline — see how many clean reps you can do"
       : "Baseline — find a clean working weight";
-    return { setsCount, perSet: Array.from({ length: setsCount }, () => ({ reps: base, last: null, load: null })), note: baseNote };
+    let baseSets = setsCount, basePerSet = Array.from({ length: setsCount }, () => ({ reps: base, last: null, load: null }));
+    ({ setsCount: baseSets, perSet: basePerSet } = applyVolumeFloor(baseSets, basePerSet, ex));
+    return { setsCount: baseSets, perSet: basePerSet, note: baseNote };
   }
   const lastSets = last.entry.sets.filter((s) => s.reps != null || s.load != null);
   const numericLoad = isNumericLoad(ex);
@@ -558,7 +579,9 @@ function prescribe(exId) {
   else if (mo) note = rd && rd.band === "primed" ? "Primed + cruising — add a set and load" : "Cruising — add load or a harder variation";
   else if (anyAdd) note = steppedTo != null ? `Cleared the range — stepped up to ${steppedTo}lb` : "Cleared the range — add load this time";
   else note = ex.load === "time" ? "Beat last time's hold" : "Beat last time's reps";
-  return { setsCount, perSet, note };
+  let finalSets = setsCount, finalPerSet = perSet;
+  ({ setsCount: finalSets, perSet: finalPerSet } = applyVolumeFloor(finalSets, finalPerSet, ex));
+  return { setsCount: finalSets, perSet: finalPerSet, note };
 }
 
 // Keeps S.workouts date-ordered so lastEntry()/recentAvgRpe() (which read by array position)
