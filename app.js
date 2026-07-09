@@ -422,9 +422,13 @@ function generateSession() {
     candidates = candidates.filter((m) => m !== "chest" && m !== "triceps");
     reasons.push("Shoulder flagged today — chest and triceps pressing skipped.");
   }
+  // Random tie-break: back/chest/biceps share the same target cadence, so without this a
+  // stable sort would deterministically favor whichever comes first in MUSCLE_TARGETS
+  // (back) every time they're tied — which, run over weeks, meant back was quietly getting
+  // 2-3x the weekly volume of chest/biceps instead of a roughly even share.
   const ranked = candidates
-    .map((m) => ({ m, due: daysSinceMuscle(m) / MUSCLE_TARGETS[m] }))
-    .sort((a, b) => b.due - a.due);
+    .map((m) => ({ m, due: daysSinceMuscle(m) / MUSCLE_TARGETS[m], r: Math.random() }))
+    .sort((a, b) => (b.due - a.due) || (b.r - a.r));
 
   // Total exercise SLOTS, not muscle count — readiness has exactly one lever for volume
   // (prescribe() already cuts sets-per-exercise on moderate/low days; cutting slot count
