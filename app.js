@@ -426,16 +426,30 @@ function generateSession() {
     .map((m) => ({ m, due: daysSinceMuscle(m) / MUSCLE_TARGETS[m] }))
     .sort((a, b) => b.due - a.due);
 
-  let strengthSlots = 5;
-  if (rd.band === "low") { strengthSlots = 3; reasons.push("Low readiness — trimmed to fewer strength moves."); }
-  else if (rd.band === "moderate") { strengthSlots = 4; reasons.push("Moderate readiness — one fewer strength move than usual."); }
+  // Total exercise SLOTS, not muscle count — readiness has exactly one lever for volume
+  // (prescribe() already cuts sets-per-exercise on moderate/low days; cutting slot count
+  // here too would double-dip and crater volume on an ordinary moderate day). Only a real
+  // low-readiness day trims slot count, and only mildly.
+  let strengthSlots = 6;
+  if (rd.band === "low") { strengthSlots = 5; reasons.push("Low readiness — one fewer strength slot."); }
 
-  const chosenMuscles = ranked.slice(0, Math.min(strengthSlots, ranked.length));
-  const strengthEx = chosenMuscles.map(({ m }) => pickLRU(MUSCLE_POOLS[m] || [], 1)[0]).filter(Boolean);
+  // The single most-overdue muscle gets TWO exercises (different angles) when its pool
+  // allows — matching how a real session concentrates volume on today's priority instead
+  // of spreading one exercise per muscle so thin it can't do much. Everyone else gets one.
+  const chosenMuscles = [];
+  let remaining = strengthSlots;
+  ranked.forEach(({ m }, i) => {
+    if (remaining <= 0) return;
+    const n = (i === 0 && (MUSCLE_POOLS[m] || []).length >= 2 && remaining >= 2) ? 2 : 1;
+    chosenMuscles.push({ m, n });
+    remaining -= n;
+  });
+  const strengthEx = chosenMuscles.flatMap(({ m, n }) => pickLRU(MUSCLE_POOLS[m] || [], n));
 
-  chosenMuscles.slice(0, 2).forEach(({ m }) => {
+  chosenMuscles.slice(0, 2).forEach(({ m, n }) => {
     const d = daysSinceMuscle(m);
-    reasons.unshift(d >= 999 ? `${MUSCLE_DISPLAY[m]} — never trained, prioritized.` : `${MUSCLE_DISPLAY[m]} — ${d}d since last trained, prioritized.`);
+    const angle = n === 2 ? " (2 exercises)" : "";
+    reasons.unshift(d >= 999 ? `${MUSCLE_DISPLAY[m]} — never trained, prioritized${angle}.` : `${MUSCLE_DISPLAY[m]} — ${d}d since last trained, prioritized${angle}.`);
   });
 
   const corePool = Object.keys(EXERCISES).filter((id) => EXERCISES[id].cat === "core");
@@ -1085,11 +1099,14 @@ function renderRunner() {
   const timed = effLoad === "time";
   const cardio = effLoad === "cardio";
   const displayName = ex.ladder ? curVar.replace(/\s*\(time\)/i, "") : ex.name;
+  // RPE ("how hard did that feel") is meaningless for corrective/stretch work — a wall slide
+  // or a thoracic rotation isn't rated on an effort scale the way a working set is.
+  const showRpe = ex.cat !== "prehab" && ex.cat !== "mobility";
   // Persistent column headers — the inputs' placeholder text disappears the moment a value
   // is pre-filled (baseline, carried-forward, or a stepped load), which is most of the time.
   const col1Head = cardio || timed ? "sec" : "reps";
   const col2Head = cardio ? "strokes" : timed ? "" : (ex.load === "reps" || !ex.load ? "bw" : (dumbbellMode(ex) ? "lb" : ex.load === "band" ? "band" : "lb"));
-  const setsHead = `<div class="setrow sethead"><span></span><span class="colhead">${esc(col1Head)}</span><span class="colhead">${esc(col2Head)}</span><span class="colhead">rpe</span></div>`;
+  const setsHead = `<div class="setrow sethead"><span></span><span class="colhead">${esc(col1Head)}</span><span class="colhead">${esc(col2Head)}</span><span class="colhead">${showRpe ? "rpe" : ""}</span></div>`;
   let rows = "";
   for (let i = 0; i < pres.setsCount; i++) {
     const p = pres.perSet[i] || {};
@@ -1108,7 +1125,7 @@ function renderRunner() {
       <button class="setdone ${ev && ev.done ? "on" : ""}" data-set="${i}" title="mark done + rest">${i + 1}</button>
       <input data-set="${i}" data-f="reps" inputmode="numeric" placeholder="${cardio || timed ? "sec" : "reps"}" value="${esc(repsVal)}" />
       ${cellHtml}
-      <select data-set="${i}" data-f="rpe"><option value="">RPE</option>${[6,7,8,9,10].map((n) => `<option ${rpeVal == n ? "selected" : ""}>${n}</option>`).join("")}</select>
+      ${showRpe ? `<select data-set="${i}" data-f="rpe"><option value="">RPE</option>${[6,7,8,9,10].map((n) => `<option ${rpeVal == n ? "selected" : ""}>${n}</option>`).join("")}</select>` : `<span></span>`}
     </div>
     <div class="settarget">target ${esc(String(tgt))}</div>`;
   }
@@ -1174,7 +1191,7 @@ function captureRun(exId) {
       load: load && load.value != null && load.value.trim() !== "" ? load.value.trim() : null,
       dist: dist && dist.value.trim() !== "" ? Number(dist.value) : null,
       unit: null,
-      rpe: rpe.value === "" ? null : Number(rpe.value),
+      rpe: rpe && rpe.value !== "" ? Number(rpe.value) : null,
       done,
     };
   });
