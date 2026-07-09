@@ -6,6 +6,7 @@ const DEFAULT_STATE = {
   v: 1,
   profile: { heightIn: 68, startWeight: 155, proteinTarget: 155, weeklyTarget: 4, restDefault: 90, walkTarget: 30, dumbbellStep: 5 },
   todaySession: null,     // {date, sess} — cached generated session so it doesn't reshuffle on every re-render (see getTodaySession)
+  recentTopMuscles: [],   // rolling list of muscles that got session-title billing recently — cooldown so the same 2-3 don't dominate every title (see generateSession)
   workouts: [],           // {id, date, sessionKey, entries:[{exId, variation, sets:[{reps,load,unit,rpe}]}], note} — sessionKey now holds a generated title string, not a fixed A/B/C key
   checkins: [],           // {date, energy(1-5), sleep(hrs), pains:[{area,sev(0-3)}], note}
   measurements: [],       // {date, weight, waist, chest, arm}
@@ -496,8 +497,22 @@ function generateSession() {
   // A muscle whose real-world measurement hasn't moved in ~3 weeks despite real training gets
   // a priority bump — this is what closes the loop between logged progress and what gets
   // trained, instead of that being a manual weekly re-tune.
+  // Cooldown: back/chest/biceps share the SAME (smallest) cadence, so once training frequency
+  // is roughly balanced across muscles, they mathematically dominate the ranking every single
+  // time — dividing by the smallest number always wins, it's not a coincidence or a tie-break
+  // glitch. That produced 3 sessions running with an identical "Back, Chest & Biceps" title
+  // even though the underlying exercise pool was rotating fine underneath it. A muscle that
+  // got session-title billing recently is discounted (not excluded) so a genuinely overdue
+  // repeat can still win, but a repeat has to actually earn it instead of winning by default.
+  const recentTop = S.recentTopMuscles || [];
   const ranked = candidates
-    .map((m) => { const stalled = muscleStalled(m); return { m, due: (daysSinceMuscle(m) / MUSCLE_TARGETS[m]) * (stalled ? 1.5 : 1), r: Math.random(), stalled }; })
+    .map((m) => {
+      const stalled = muscleStalled(m);
+      let due = (daysSinceMuscle(m) / MUSCLE_TARGETS[m]) * (stalled ? 1.5 : 1);
+      const recentCount = recentTop.filter((x) => x === m).length;
+      if (recentCount > 0) due *= Math.pow(0.7, recentCount);
+      return { m, due, r: Math.random(), stalled };
+    })
     .sort((a, b) => (b.due - a.due) || (b.r - a.r));
 
   // Total exercise SLOTS, not muscle count. Readiness no longer touches this at all — it has
@@ -540,13 +555,15 @@ function generateSession() {
     { title: "Conditioning", ex: condEx },
   ].filter((b) => b.ex.length);
 
-  const title = joinNice(chosenMuscles.slice(0, 3).map(({ m }) => MUSCLE_DISPLAY[m])) || "Full Body";
+  const titleMuscles = chosenMuscles.slice(0, 3).map(({ m }) => m);
+  const title = joinNice(titleMuscles.map((m) => MUSCLE_DISPLAY[m])) || "Full Body";
   const focusParts = chosenMuscles.map(({ m }) => MUSCLE_DISPLAY[m].toLowerCase());
   focusParts.push("core");
   if (condEx.length) focusParts.push("conditioning");
   const focus = focusParts.join(", ").replace(/^./, (c) => c.toUpperCase());
 
-  return { title, focus, blocks, reasons };
+  // topMuscles isn't displayed — regenerateSession() reads it to update the cooldown list above.
+  return { title, focus, blocks, reasons, topMuscles: titleMuscles };
 }
 // Cached per calendar day so the exercise list doesn't reshuffle every time Today re-renders
 // (which happens on nearly every tap — protein, walk, etc). Regenerating is an explicit action.
@@ -557,6 +574,10 @@ function getTodaySession() {
 function regenerateSession() {
   const sess = generateSession();
   S.todaySession = { date: today(), sess };
+  // Remember today's title muscles for the cooldown discount above — capped to roughly the
+  // last 2 sessions' worth so a muscle recovers its normal priority after sitting out briefly,
+  // rather than being suppressed indefinitely.
+  S.recentTopMuscles = [...(S.recentTopMuscles || []), ...(sess.topMuscles || [])].slice(-6);
   S._m = Date.now(); save();
   return sess;
 }
