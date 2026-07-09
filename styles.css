@@ -98,6 +98,8 @@ h2.sec, .blk-title {
 .ex:first-child { border-top: none; }
 .ex .name { font-weight: 700; font-size: 1.06rem; letter-spacing: -0.01em; }
 .ex .cue { color: var(--ink-2); font-size: 0.88rem; margin-top: 5px; line-height: 1.5; max-width: 52ch; }
+.cue.clamped { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cuemore { display: block; margin-top: 4px; }
 .ex .meta { display: flex; gap: 12px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
 .lastnote {
   font-family: var(--m); font-size: 0.74rem; color: var(--mut); margin-top: 8px;

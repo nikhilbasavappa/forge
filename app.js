@@ -887,6 +887,23 @@ function demoLink(ex) {
   const url = "https://www.youtube.com/results?search_query=" + encodeURIComponent(ex.q);
   return `<a class="lnk demo" href="${url}" target="_blank" rel="noopener">Demo ↗</a>`;
 }
+// When a demo video exists, the full cue (form + rationale + tips, often 2-3 sentences) is
+// redundant with it and just clutters the page — collapse to ~2 lines with a tap-to-expand
+// rather than trimming the text itself, so a safety note buried in the 2nd/3rd sentence
+// (e.g. "stop if the shoulder feels unstable") is never silently lost.
+function cueBlock(ex, text) {
+  text = text ?? ex.cue;
+  if (!ex.q) return `<div class="cue">${esc(text)}</div>`;
+  const id = "cue-" + Math.random().toString(36).slice(2, 9);
+  return `<div class="cue clamped" id="${id}">${esc(text)}</div><button class="linkbtn cuemore" data-cuetoggle="${id}">More ›</button>`;
+}
+function bindCueToggles() {
+  document.querySelectorAll("[data-cuetoggle]").forEach((btn) => btn.onclick = () => {
+    const el = document.getElementById(btn.dataset.cuetoggle);
+    const isClamped = el.classList.toggle("clamped");
+    btn.textContent = isClamped ? "More ›" : "Less ‹";
+  });
+}
 function equipList(ex) { return (ex && Array.isArray(ex.equip)) ? ex.equip.slice() : []; }
 function equipLine(ex) {
   const eq = equipList(ex);
@@ -1026,7 +1043,7 @@ function renderToday() {
       const swapped = exId !== rawId ? `<span class="pill">swapped</span>` : "";
       html += `<div class="ex">
         <div class="row"><div class="name tappable" data-exhist="${exId}">${esc(ex.name)} ›</div><span class="pill">${targetLabel(ex)}</span></div>
-        <div class="cue">${esc(ex.cue)}</div>
+        ${cueBlock(ex)}
         <div class="meta">${sg.text === "No history yet" ? "" : `<span class="pill ${sg.lvl}">${esc(sg.text)}</span>`}${swapped}${demoLink(ex)}</div>
         ${last ? `<div class="lastnote">${esc(last)}</div>` : ""}
       </div>`;
@@ -1069,6 +1086,7 @@ function renderToday() {
   const dOff = document.getElementById("deload-off"); if (dOff) dOff.onclick = () => { S.deloadWeek = null; S._m = Date.now(); save(); renderToday(); };
   const rm = document.getElementById("rec-mob"); if (rm) rm.onclick = () => startMobility();
   document.querySelectorAll("[data-exhist]").forEach((el) => el.onclick = () => renderExercise(el.dataset.exhist));
+  bindCueToggles();
   const regen = document.getElementById("regen-sess");
   if (regen) regen.onclick = () => { regenerateSession(); toast("New session generated"); renderToday(); };
   document.querySelectorAll("[data-protein]").forEach((b) => b.onclick = () => { addProtein(+b.dataset.protein); renderToday(); });
@@ -1179,7 +1197,7 @@ function renderRunner() {
     <div class="card">
       <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${timed ? `${pres.setsCount}× hold` : targetLabel(ex)}</span></div>
       ${ex.ladder ? `<div class="tiny muted" style="margin:-2px 0 4px">Variation: ${esc(displayName)}${timed ? " · timed hold" : ""}</div>` : ""}
-      <div class="cue">${esc(ex.ladder && timed ? "Hold with good form as long as you can — no reps. Tap ‘time it’ to run the clock." : ex.cue)}</div>
+      ${ex.ladder && timed ? `<div class="cue">Hold with good form as long as you can — no reps. Tap ‘time it’ to run the clock.</div>` : cueBlock(ex)}
       ${equipLine(ex)}${setupLine(ex)}
       <div class="meta"><span class="pill ${prescribeLvl(pres)}">${esc(pres.note)}</span>${demoLink(ex)}<button class="linkbtn" id="run-swap">Swap →</button></div>
       ${lastLabel(exId) ? `<div class="lastnote">${esc(lastLabel(exId))} → aim to beat it</div>` : ""}
@@ -1208,6 +1226,7 @@ function renderRunner() {
   const fin = document.getElementById("run-finish"); if (fin) fin.onclick = () => { captureRun(exId); finishRun(); };
   document.getElementById("run-swap").onclick = () => renderSwapPanel(exId);
   document.querySelectorAll(".sets input, .sets select").forEach((el) => el.addEventListener("change", () => captureRun(exId)));
+  bindCueToggles();
 }
 
 function captureRun(exId) {
