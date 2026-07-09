@@ -644,16 +644,10 @@ function applyVolumeFloor(setsCount, perSet, ex) {
 function prescribe(exId) {
   const ex = EXERCISES[exId];
   if (ex.load === "cardio") {
-    return { setsCount: ex.target.sets, perSet: Array.from({ length: ex.target.sets }, () => ({ reps: ex.target.sec })), note: lastCardio(exId) ? "Beat last stroke count in the same time" : "Steady pace — log your strokes" };
-  }
-  // A conditioning exercise with load "time" (rower intervals: 6x 30s hard/60s easy) is a
-  // FIXED work-interval protocol, not an endurance hold to be maxed out — without this check
-  // it fell into the generic time-exercise branch below, which treats every timed exercise as
-  // "how long can you hold, add 10s once you clear it," escalating the "hard effort" duration
-  // to absurd lengths (30s -> 40s -> 50s...) session over session. The interval length is fixed
-  // by the protocol; what should improve is effort within it, which isn't tracked here.
-  if (ex.cat === "cond") {
-    return { setsCount: ex.target.sets, perSet: Array.from({ length: ex.target.sets }, () => ({ reps: ex.target.sec, load: null })), note: "Fixed work interval — hard effort for the time, easy to recover between rounds" };
+    // Multiple sets means repeated hard efforts (rower intervals), not one continuous piece
+    // (rower steady-state) — the baseline note shouldn't call an interval "steady pace."
+    const baseNote = ex.target.sets > 1 ? "Hard effort — log your strokes" : "Steady pace — log your strokes";
+    return { setsCount: ex.target.sets, perSet: Array.from({ length: ex.target.sets }, () => ({ reps: ex.target.sec })), note: lastCardio(exId) ? "Beat last stroke count in the same time" : baseNote };
   }
   const last = lastEntry(exId);
   const deload = deloadActive();
@@ -1360,11 +1354,6 @@ function renderRunner() {
       // dead hang start) — not a genuine timed exercise that's meant to keep climbing forever,
       // so no "beat your last max" framing here (matches prescribe()'s flat 30s target above).
       tgt = "hold ~30s, good form — 45s clean on any set clears this rung";
-    }
-    else if (timed && ex.cat === "cond") {
-      // Fixed work interval, not an endurance hold — no "beat your max" framing (matches
-      // prescribe()'s flat target above).
-      tgt = `${fmtDur(p.reps)} hard, then easy to recover`;
     }
     else if (timed) tgt = p.last != null ? `hold — beat ${fmtDur(p.last)}` : "hold — hit ‘time it’ to run the timer";
     else if (ex.cat === "prehab") {
