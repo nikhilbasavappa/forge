@@ -1372,8 +1372,8 @@ function renderRunner() {
       ${ex.ladder && timed ? `<div class="cue">Hold with good form as long as you can — no reps. Tap ‘time it’ to run the clock.</div>` : cueBlock(ex)}
       ${equipLine(ex)}${setupLine(ex)}
       ${warmupHint(exId)}
-      <div class="meta"><span class="pill ${prescribeLvl(pres)}">${esc(pres.note)}</span>${demoLink(ex)}<button class="linkbtn" id="run-swap">Swap →</button></div>
-      ${lastLabel(exId) ? `<div class="lastnote">${esc(lastLabel(exId))} → aim to beat it</div>` : ""}
+      <div class="meta">${ex.cat === "prehab" ? "" : `<span class="pill ${prescribeLvl(pres)}">${esc(pres.note)}</span>`}${demoLink(ex)}<button class="linkbtn" id="run-swap">Swap →</button></div>
+      ${lastLabel(exId) ? `<div class="lastnote">${esc(lastLabel(exId))}${ex.cat === "prehab" ? "" : " → aim to beat it"}</div>` : ""}
       ${ladderCtl}
       <div class="sets">${setsHead}${rows}</div>
     </div>
