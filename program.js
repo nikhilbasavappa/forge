@@ -139,6 +139,13 @@ const EXERCISES = {
     cue: "Raise out to shoulder height, slight forward tilt, pinkies leading; control the descent. Light and strict — this is the side-delt 'cap' for shoulder width. Water bottles work if you've no bands/dumbbells yet.",
     q: "dumbbell lateral raise side delt form"
   },
+  band_upright_row: {
+    name: "Band Upright Row", cat: "pull", muscle: "side_delts", load: "band", target: { sets: 3, lo: 10, hi: 15 },
+    equip: ["Bands"],
+    setup: "Stand on the middle of a band, a handle in each hand in front of your thighs, palms facing your body.",
+    cue: "Pull the handles straight up along your body, leading with the elbows, to about chest height — no higher, that's where the shoulder risk starts. Pause, lower under control. A second angle on the side delts, different loading curve than the lateral raise.",
+    q: "band upright row exercise"
+  },
   band_curl: {
     name: "Biceps Curl (supinated)", cat: "pull", muscle: "biceps", load: "band", target: { sets: 3, lo: 8, hi: 15 },
     equip: ["Bands"],
@@ -356,7 +363,8 @@ const ALTS = {
   trx_row: ["door_row", "band_row", "prone_row"],
   door_row: ["band_row", "prone_row", "trx_row"],
   band_row: ["door_row", "prone_row", "trx_row"],
-  lateral_raise: ["pike_pushup", "prone_ytw"],
+  lateral_raise: ["band_upright_row", "prone_ytw"],
+  band_upright_row: ["lateral_raise", "prone_ytw"],
   band_press: ["pushup_prog", "band_fly", "deep_pushup"],
   pushup_prog: ["band_press", "band_fly", "deep_pushup"],
   band_fly: ["deep_pushup", "pushup_prog", "band_press"],

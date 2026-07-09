@@ -430,12 +430,11 @@ function generateSession() {
     .map((m) => ({ m, due: daysSinceMuscle(m) / MUSCLE_TARGETS[m], r: Math.random() }))
     .sort((a, b) => (b.due - a.due) || (b.r - a.r));
 
-  // Total exercise SLOTS, not muscle count — readiness has exactly one lever for volume
-  // (prescribe() already cuts sets-per-exercise on moderate/low days; cutting slot count
-  // here too would double-dip and crater volume on an ordinary moderate day). Only a real
-  // low-readiness day trims slot count, and only mildly.
-  let strengthSlots = 6;
-  if (rd.band === "low") { strengthSlots = 5; reasons.push("Low readiness — one fewer strength slot."); }
+  // Total exercise SLOTS, not muscle count. Readiness no longer touches this at all — it has
+  // exactly one lever for volume (prescribe() trims sets-per-exercise on a genuinely low day),
+  // not two. Pre-workout subjective state predicts in-session capacity poorly; real fatigue
+  // shows up as underperforming actual sets, which RPE-gated progression already responds to.
+  const strengthSlots = 6;
 
   // The single most-overdue muscle gets TWO exercises (different angles) when its pool
   // allows — matching how a real session concentrates volume on today's priority instead
@@ -531,10 +530,15 @@ function prescribe(exId) {
   const deload = deloadActive();
   const rd = readiness();
   const mo = momentum(exId, ex);
+  // Readiness cuts volume far more mildly than it used to. Pre-workout subjective state (how
+  // tired you feel before starting) is a weak predictor of in-session capacity — real fatigue
+  // shows up as not being able to hit reps once a set actually gets hard, which RPE-gated
+  // progression (below) already catches and responds to next session. A "moderate" day is a
+  // normal day, not an impaired one, so it no longer touches volume at all; "low" (usually
+  // driven by real pain flags or bad sleep, not just feeling tired) trims one set, not ~40%.
   let setsCount = ex.target.sets;
   if (deload) setsCount = Math.max(1, Math.ceil(ex.target.sets * 0.6));
-  else if (rd && rd.band === "low") setsCount = Math.max(1, Math.ceil(ex.target.sets * 0.6));
-  else if (rd && rd.band === "moderate") setsCount = Math.max(1, ex.target.sets - 1);
+  else if (rd && rd.band === "low") setsCount = Math.max(1, ex.target.sets - 1);
   else if (rd && rd.band === "primed" && mo && ex.load !== "time") setsCount = ex.target.sets + 1;
 
   if (!last) {
@@ -578,8 +582,7 @@ function prescribe(exId) {
     return { setsCount, perSet, note: "Deload — lighter, leave 2–3 reps in reserve" };
   }
   let note;
-  if (rd && rd.band === "low") note = "Low readiness — cut it back, easy sets";
-  else if (rd && rd.band === "moderate") note = "Moderate readiness — one less set";
+  if (rd && rd.band === "low") note = "Low readiness — one fewer set, but push the ones you do";
   else if (mo) note = rd && rd.band === "primed" ? "Primed + cruising — add a set and load" : "Cruising — add load or a harder variation";
   else if (anyAdd) note = steppedTo != null ? `Cleared the range — stepped up to ${steppedTo}lb` : "Cleared the range — add load this time";
   else note = ex.load === "time" ? "Beat last time's hold" : "Beat last time's reps";
@@ -1146,7 +1149,12 @@ function renderRunner() {
     let tgt;
     if (cardio) tgt = cardioTarget(exId, ex);
     else if (timed) tgt = p.last != null ? `hold — beat ${fmtDur(p.last)}` : "hold — hit ‘time it’ to run the timer";
-    else tgt = `${p.reps}${p.loadStepped ? ` · stepped to ${p.load}lb (was ${p.prevLoad})` : (p.addLoad ? " +load" : "")}`;
+    else {
+      tgt = `${p.reps}${p.loadStepped ? ` · stepped to ${p.load}lb (was ${p.prevLoad})` : (p.addLoad ? " +load" : "")}`;
+      // Effort guidance on real strength work — the number alone doesn't say how hard to push it,
+      // and evidence points to proximity-to-failure mattering more than the exact rep count.
+      if (ex.muscle) tgt += i === pres.setsCount - 1 ? " · last set: push close to failure" : " · leave ~2 in reserve";
+    }
     const cellHtml = timed ? `<button class="qbtn holdbtn" data-hold="${i}">⏱ time it</button>` : runnerLoadCell({ ...ex, load: effLoad }, i, cellVal);
     rows += `<div class="setrow">
       <button class="setdone ${ev && ev.done ? "on" : ""}" data-set="${i}" title="mark done + rest">${i + 1}</button>
@@ -1415,6 +1423,7 @@ function renderHelp() {
     <div class="card">
       ${d("3×8–12", "3 sets of 8 to 12 reps. \"/side\" means per side. Timed work shows minutes:seconds (5:00 = 5 min).")}
       ${d("RPE (6–10)", "How hard the set felt. 10 = nothing left in the tank; 8 ≈ 2 reps in reserve. <b>Log it honestly</b> — the app uses it to decide when to push you.")}
+      ${d("When to go to failure", "The target under each set says it: earlier sets, leave ~2 reps in reserve (RPE 8) — hard, but not a grind. The <b>last set of each strength move, push close to true failure</b> — that's where most of the growth signal comes from. Prehab/core sets aren't rated this way; those aren't about maxing effort.")}
       ${d("Target", "The number to beat, pre-filled with what you actually did last time — or, right after a weight step-up, reset to the bottom of the rep range at the new heavier load.")}
       ${d("Swap", "Sub an exercise (e.g. the shoulder flares up). It sticks for future sessions; undo in More → Equipment.")}
       ${d("Variation", "For progressions (push-up, pull-up, chin-up) — which rung of the ladder you're on.")}
@@ -1425,7 +1434,7 @@ function renderHelp() {
     <div class="card">
       <div class="cue" style="margin:2px 0 10px">A daily score from your check-in that scales the whole session — both directions.</div>
       ${d("How it's built", "Starts ~60 (a normal day). <b>Energy</b> is the biggest lever. Good sleep &amp; quality add; poor subtract. Pain flags subtract (shoulder counts double). Several days training in a row subtract a little for fatigue. Capped 0–100.")}
-      ${d("What it does", "<b>Primed</b> (75+): full or +1 set, push load. <b>Ready</b> (58+): normal. <b>Moderate</b> (44+): one less set. <b>Low</b> (&lt;44): cut sets ~40%, easy targets.")}
+      ${d("What it does", "<b>Primed</b> (75+) + cruising two sessions running: +1 set, push load. <b>Ready/Moderate</b> (44+): no change — pre-workout state predicts capacity poorly, so a normal-ish day trains normally; real fatigue shows up as underperforming a set, which progression reacts to next session. <b>Low</b> (&lt;44, usually real pain flags or bad sleep): one fewer set per exercise, not a big cut — push the sets you do.")}
     </div>
 
     <div class="blk-title"><span class="dot"></span>How it adapts</div>
