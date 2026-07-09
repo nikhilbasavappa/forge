@@ -650,6 +650,24 @@ function prescribe(exId) {
   const deload = deloadActive();
   const rd = readiness();
   const mo = momentum(exId, ex);
+  // A ladder rung can be timed (chinup_prog/pullup_prog's "Dead hang (time)" starting rung)
+  // even though the exercise's own load type is "reps" for its later rungs — ex.load alone
+  // doesn't know that. Without this check, the reps-shaped machinery below ran on the raw
+  // held-seconds number: the 20-rep volume floor forced extra sets chasing "20 reps" out of a
+  // number that's actually seconds, and "beat last time" chased your raw hold time upward with
+  // no ceiling, every set, every session. The 45s advance-off-this-rung bar already lives in
+  // advanceLadders and only needs ONE clean hold to fire — this doesn't need to hunt a new max
+  // every set, so it gets a flat, modest, un-inflated target instead.
+  if (ex.ladder && isTimedVariation(ex.ladder[assignedRung(exId)], ex) && ex.load !== "time") {
+    const setsCount = deload ? Math.max(1, Math.ceil(ex.target.sets * 0.6)) : ex.target.sets;
+    const lastSets = last ? last.entry.sets.filter((s) => s.reps != null) : [];
+    const bestLast = lastSets.length ? Math.max(...lastSets.map((s) => +s.reps || 0)) : null;
+    return {
+      setsCount,
+      perSet: Array.from({ length: setsCount }, () => ({ reps: 30, last: bestLast, load: null })),
+      note: "Hold ~30s with good form — one clean 45s hold on any set levels you up, no need to max every set",
+    };
+  }
   // Readiness cuts volume far more mildly than it used to. Pre-workout subjective state (how
   // tired you feel before starting) is a weak predictor of in-session capacity — real fatigue
   // shows up as not being able to hit reps once a set actually gets hard, which RPE-gated
@@ -1328,6 +1346,12 @@ function renderRunner() {
     const rpeVal = ev && ev.rpe ? ev.rpe : "";
     let tgt;
     if (cardio) tgt = cardioTarget(exId, ex);
+    else if (timed && ex.ladder && ex.load !== "time") {
+      // A timed ladder rung on an otherwise reps-based exercise (chinup_prog/pullup_prog's
+      // dead hang start) — not a genuine timed exercise that's meant to keep climbing forever,
+      // so no "beat your last max" framing here (matches prescribe()'s flat 30s target above).
+      tgt = "hold ~30s, good form — 45s clean on any set clears this rung";
+    }
     else if (timed) tgt = p.last != null ? `hold — beat ${fmtDur(p.last)}` : "hold — hit ‘time it’ to run the timer";
     else if (ex.cat === "prehab") {
       // No progression framing at all for prehab — it's not building toward a max or a load,
