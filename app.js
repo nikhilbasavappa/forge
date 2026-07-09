@@ -100,7 +100,16 @@ function mergeStates(a, b) {
   const ac = {};
   [...(a.activity || []), ...(b.activity || [])].forEach((x) => { const e = ac[x.id]; if (!e || (x._m || 0) >= (e._m || 0)) ac[x.id] = x; });
   out.activity = Object.values(ac).sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : x.id - y.id));
-  if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.equipment = b.equipment; out.swaps = b.swaps; out.ladders = b.ladders; out.deloadWeek = b.deloadWeek; out._m = b._m; }
+  // Ladder rungs are monotonic progress, not a setting — last-writer-wins is wrong here.
+  // _m is one timestamp for the WHOLE state blob, bumped by any save on either device (a
+  // measurement, a walk, anything), completely unrelated to whether ladders changed. Wholesale-
+  // replacing ladders by that timestamp meant a stale device doing something unrelated could
+  // silently revert a rung another device had just advanced — take the higher rung per exercise
+  // instead, so a real advance can never be clobbered by an unrelated, later-timestamped save.
+  const ladderIds = new Set([...Object.keys(a.ladders || {}), ...Object.keys(b.ladders || {})]);
+  out.ladders = {};
+  ladderIds.forEach((id) => { out.ladders[id] = Math.max((a.ladders || {})[id] || 0, (b.ladders || {})[id] || 0); });
+  if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.equipment = b.equipment; out.swaps = b.swaps; out.deloadWeek = b.deloadWeek; out._m = b._m; }
   return out;
 }
 
