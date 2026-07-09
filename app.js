@@ -315,7 +315,13 @@ function exHistory(exId) {
     const top = Math.max(...sets.map((s) => +s.reps || 0));
     const topSet = sets.find((s) => +s.reps === top) || sets[0];
     const loadNum = topSet && topSet.load != null && topSet.load !== "" && isFinite(+topSet.load) ? +topSet.load : null;
-    out.push({ date: w.date, top, rpe: Math.max(0, ...sets.map((s) => +s.rpe || 0)) || null, load: loadNum });
+    // RPE here excludes the LAST set — that one's meant to be pushed near failure by design,
+    // so it shouldn't count against "were the working sets otherwise comfortable" (momentum()
+    // reads this to decide whether to add volume; gating it on the intentional-failure set
+    // would mean it could basically never fire for anyone following the per-set guidance).
+    const earlySets = sets.slice(0, -1);
+    const rpe = earlySets.length ? (Math.max(0, ...earlySets.map((s) => +s.rpe || 0)) || null) : null;
+    out.push({ date: w.date, top, rpe, load: loadNum });
   });
   return out;
 }
@@ -631,7 +637,10 @@ function prescribe(exId) {
       perSet.push({ reps: t >= ex.target.sec ? t + 10 : ex.target.sec, last: lastReps, load: ls.load ?? null });
     } else {
       const r = lastReps || ex.target.lo;
-      const hitTop = r >= ex.target.hi && (!ls.rpe || ls.rpe <= 8);
+      // The last set of an exercise is intentionally pushed close to failure now (see the
+      // per-set target guidance in the runner) — clearing the range ON that set is a stronger
+      // signal to progress, not a weaker one, so only earlier sets get the RPE<=8 gate.
+      const hitTop = r >= ex.target.hi && (i === setsCount - 1 || !ls.rpe || ls.rpe <= 8);
       if (hitTop) anyAdd = true;
       // Double progression: climb reps to the top of the range, then on the NEXT session
       // reset reps to the bottom and step the weight up — for numeric-load exercises this
@@ -715,7 +724,9 @@ function suggest(exId) {
   }
   const topReps = Math.max(...sets.map((s) => +s.reps || 0));
   const allHit = sets.length >= (ex.target.sets || 1) && sets.every((s) => (+s.reps || 0) >= ex.target.hi);
-  const lowRpe = sets.every((s) => !s.rpe || s.rpe <= 8);
+  // Same last-set-is-meant-to-be-near-failure reasoning as prescribe()/advanceLadders — only
+  // the earlier sets need to have stayed comfortable.
+  const lowRpe = sets.slice(0, -1).every((s) => !s.rpe || s.rpe <= 8);
   if (allHit && lowRpe) {
     return { lvl: "good", text: ex.ladder ? "Top of range: add load or variation" : "Top of range: +load or +1 rep/set" };
   }
@@ -969,6 +980,16 @@ function bindCueToggles() {
     btn.textContent = isClamped ? "More ›" : "Less ‹";
   });
 }
+// One-line reminder on the session's first real-external-load exercise: ramp up before the
+// working sets. Not a tracked/logged set on purpose — a full extra input row + its own capture
+// logic would be more data model than this is worth; it's a nudge, not something to progress.
+function warmupHint(exId) {
+  if (!RUN || RUN.warmupFor !== exId) return "";
+  const l = lastEntry(exId);
+  const lastLoad = l && l.entry.sets.length ? l.entry.sets.find((s) => s.load != null)?.load : null;
+  const suggestion = lastLoad && isFinite(+lastLoad) ? `around ${Math.round(+lastLoad / 2)}lb` : "very light";
+  return `<div class="banner">Warm up first — 1–2 easy sets at ${suggestion}, ~12 reps, nothing near failure. Not logged below, just get the joint moving before the working sets.</div>`;
+}
 function equipList(ex) { return (ex && Array.isArray(ex.equip)) ? ex.equip.slice() : []; }
 function equipLine(ex) {
   const eq = equipList(ex);
@@ -1173,7 +1194,12 @@ function saveRun() { if (RUN) localStorage.setItem(RUN_KEY, JSON.stringify(RUN))
 
 function startRun(sess, dateStr) {
   const rawList = blocksFlat(sess);
-  RUN = { title: sess.title, rawList, list: rawList.map(resolveEx), idx: 0, startTs: Date.now(), data: {}, date: dateStr || null };
+  const list = rawList.map(resolveEx);
+  // The first real external-load exercise of the session gets a one-line warm-up reminder
+  // (see renderRunner) — not a tracked/logged set, just a nudge, so it doesn't need its own
+  // data model or touch progression math. Only relevant once real weight is involved.
+  const warmupFor = list.find((id) => isNumericLoad(EXERCISES[id])) || null;
+  RUN = { title: sess.title, rawList, list, idx: 0, startTs: Date.now(), data: {}, date: dateStr || null, warmupFor };
   saveRun(); renderRunner();
 }
 function startPrehab() {
@@ -1266,6 +1292,7 @@ function renderRunner() {
       ${ex.ladder ? `<div class="tiny muted" style="margin:-2px 0 4px">Variation: ${esc(displayName)}${timed ? " · timed hold" : ""}</div>` : ""}
       ${ex.ladder && timed ? `<div class="cue">Hold with good form as long as you can — no reps. Tap ‘time it’ to run the clock.</div>` : cueBlock(ex)}
       ${equipLine(ex)}${setupLine(ex)}
+      ${warmupHint(exId)}
       <div class="meta"><span class="pill ${prescribeLvl(pres)}">${esc(pres.note)}</span>${demoLink(ex)}<button class="linkbtn" id="run-swap">Swap →</button></div>
       ${lastLabel(exId) ? `<div class="lastnote">${esc(lastLabel(exId))} → aim to beat it</div>` : ""}
       ${ladderCtl}
@@ -1532,6 +1559,7 @@ function renderHelp() {
       ${d("Weight/waist stall", "If weight and waist/belly both sit flat for ~3 weeks despite consistent training, Today shows a banner — but it doesn't touch your training. Fat loss stalling is a nutrition signal, not a reason to add more sets.")}
       ${d("Deload", "A lighter recovery week, auto-flagged after shoulder pain 3+ days, low energy 3+ days, or ~4 weeks training straight. Cuts volume ~40%, holds load.")}
       ${d("Recovery nudge", "5+ days in a row → suggests a mobility day.")}
+      ${d("Warm-up", "The first real-weight exercise of a session (once Dumbbells are on) gets a one-line ramp-up reminder — 1–2 easy sets before the working ones. Not tracked or logged, just a nudge before real external load.")}
     </div>
 
     <div class="blk-title"><span class="dot"></span>Sessions &amp; routines</div>
@@ -1587,7 +1615,9 @@ function advanceLadders(entries) {
     const r = assignedRung(e.exId);
     if (r >= ex.ladder.length - 1) return;
     const top = Math.max(0, ...e.sets.map((s) => +s.reps || 0));
-    const clearedRpe = e.sets.every((s) => !s.rpe || s.rpe <= 8);
+    // Same reasoning as prescribe()'s hitTop: the last set is meant to be pushed near failure,
+    // so only the earlier sets need to have stayed comfortable for this to count as a clean clear.
+    const clearedRpe = e.sets.slice(0, -1).every((s) => !s.rpe || s.rpe <= 8);
     const advance = isTimedVariation(ex.ladder[r]) ? top >= 45 : (top >= ex.target.hi && clearedRpe);
     if (advance) { S.ladders[e.exId] = r + 1; leveled.push(ex.ladder[r + 1].replace(/\s*\(time\)/i, "")); }
   });
