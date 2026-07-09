@@ -390,6 +390,67 @@ function daysSinceMuscle(muscle) {
   scan(S.workouts); scan(S.activity);
   return best === Infinity ? 999 : best;
 }
+// Reads a measurement field off a record, averaging L/R for the two-sided ones.
+function measurementValue(rec, field) {
+  if (field === "armAvg") { const v = [rec.armL, rec.armR].filter((x) => x != null).map(Number); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; }
+  if (field === "thighAvg") { const v = [rec.thighL, rec.thighR].filter((x) => x != null).map(Number); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; }
+  return rec[field] != null ? +rec[field] : null;
+}
+// Sorted (date, value) pairs for a measurement field, most recent last.
+function measurementSeries(field) {
+  return S.measurements.map((r) => ({ date: r.date, v: measurementValue(r, field) }))
+    .filter((p) => p.v != null).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+// Has a muscle's real-world measurement proxy failed to grow over ~3 weeks despite him
+// actually training it? A real trainer would notice a plateau and adjust the program, not
+// just keep running the same volume and hoping — but only if he actually put the work in;
+// otherwise the fix is training more consistently, not more program cleverness.
+function muscleStalled(muscle) {
+  const field = MUSCLE_MEASUREMENT[muscle];
+  if (!field) return false;
+  const pts = measurementSeries(field);
+  if (pts.length < 2) return false;
+  const latest = pts[pts.length - 1];
+  if (daysAgo(latest.date) > 10) return false; // no recent reading, don't act on stale data
+  const baseline = [...pts].reverse().find((p) => daysBetween(p.date, latest.date) >= 14);
+  if (!baseline) return false;
+  if (latest.v > baseline.v + 0.1) return false; // real growth beyond measurement noise
+  const windowDays = daysBetween(baseline.date, latest.date);
+  const sessionsHit = S.workouts.filter((w) => daysBetween(w.date, latest.date) <= windowDays
+    && w.entries.some((e) => EXERCISES[e.exId] && EXERCISES[e.exId].muscle === muscle)).length;
+  return sessionsHit >= 4;
+}
+// Fat-loss/recomp progress (weight, waist, belly) is a nutrition signal, not a training-volume
+// one -- a real trainer wouldn't add more chest sets because your waist isn't shrinking. Flags
+// it as a distinct nudge rather than feeding it into exercise selection at all.
+function bodyCompStalled() {
+  const checks = [{ field: "weight", margin: 1 }, { field: "waist", margin: 0.3 }, { field: "belly", margin: 0.3 }];
+  const readable = checks.filter(({ field }) => {
+    const pts = measurementSeries(field);
+    if (pts.length < 2) return false;
+    const latest = pts[pts.length - 1];
+    if (daysAgo(latest.date) > 10) return false;
+    const baseline = [...pts].reverse().find((p) => daysBetween(p.date, latest.date) >= 14);
+    return !!baseline;
+  });
+  if (!readable.length) return null;
+  const anyImproved = readable.some(({ field, margin }) => {
+    const pts = measurementSeries(field);
+    const latest = pts[pts.length - 1];
+    const baseline = [...pts].reverse().find((p) => daysBetween(p.date, latest.date) >= 14);
+    return latest.v <= baseline.v - margin; // real decrease, not noise
+  });
+  if (anyImproved) return null;
+  const windowDays = Math.max(...readable.map(({ field }) => {
+    const pts = measurementSeries(field);
+    const latest = pts[pts.length - 1];
+    const baseline = [...pts].reverse().find((p) => daysBetween(p.date, latest.date) >= 14);
+    return daysBetween(baseline.date, latest.date);
+  }));
+  const sessionsInWindow = S.workouts.filter((w) => daysBetween(w.date, today()) <= windowDays).length;
+  if (sessionsInWindow < 6) return null; // hasn't trained enough to draw a conclusion either way
+  return "Weight/waist hasn't moved in a few weeks despite consistent training — that's usually a nutrition signal (protein, portions, deficit), not a reason to add more volume.";
+}
 // Least-recently-used pick from a pool, with a random tie-break so equally-stale options
 // (most commonly "never done") don't always resolve to the same exercise.
 function pickLRU(pool, n) {
@@ -426,8 +487,11 @@ function generateSession() {
   // stable sort would deterministically favor whichever comes first in MUSCLE_TARGETS
   // (back) every time they're tied — which, run over weeks, meant back was quietly getting
   // 2-3x the weekly volume of chest/biceps instead of a roughly even share.
+  // A muscle whose real-world measurement hasn't moved in ~3 weeks despite real training gets
+  // a priority bump — this is what closes the loop between logged progress and what gets
+  // trained, instead of that being a manual weekly re-tune.
   const ranked = candidates
-    .map((m) => ({ m, due: daysSinceMuscle(m) / MUSCLE_TARGETS[m], r: Math.random() }))
+    .map((m) => { const stalled = muscleStalled(m); return { m, due: (daysSinceMuscle(m) / MUSCLE_TARGETS[m]) * (stalled ? 1.5 : 1), r: Math.random(), stalled }; })
     .sort((a, b) => (b.due - a.due) || (b.r - a.r));
 
   // Total exercise SLOTS, not muscle count. Readiness no longer touches this at all — it has
@@ -441,18 +505,19 @@ function generateSession() {
   // of spreading one exercise per muscle so thin it can't do much. Everyone else gets one.
   const chosenMuscles = [];
   let remaining = strengthSlots;
-  ranked.forEach(({ m }, i) => {
+  ranked.forEach(({ m, stalled }, i) => {
     if (remaining <= 0) return;
     const n = (i === 0 && (MUSCLE_POOLS[m] || []).length >= 2 && remaining >= 2) ? 2 : 1;
-    chosenMuscles.push({ m, n });
+    chosenMuscles.push({ m, n, stalled });
     remaining -= n;
   });
   const strengthEx = chosenMuscles.flatMap(({ m, n }) => pickLRU(MUSCLE_POOLS[m] || [], n));
 
-  chosenMuscles.slice(0, 2).forEach(({ m, n }) => {
+  chosenMuscles.slice(0, 2).forEach(({ m, n, stalled }) => {
     const d = daysSinceMuscle(m);
     const angle = n === 2 ? " (2 exercises)" : "";
-    reasons.unshift(d >= 999 ? `${MUSCLE_DISPLAY[m]} — never trained, prioritized${angle}.` : `${MUSCLE_DISPLAY[m]} — ${d}d since last trained, prioritized${angle}.`);
+    if (stalled) reasons.unshift(`${MUSCLE_DISPLAY[m]} — measurement hasn't moved in ~3 weeks despite real training, priority bumped${angle}.`);
+    else reasons.unshift(d >= 999 ? `${MUSCLE_DISPLAY[m]} — never trained, prioritized${angle}.` : `${MUSCLE_DISPLAY[m]} — ${d}d since last trained, prioritized${angle}.`);
   });
 
   const corePool = Object.keys(EXERCISES).filter((id) => EXERCISES[id].cat === "core");
@@ -1017,6 +1082,8 @@ function renderToday() {
   const dslw = daysSinceLastWorkout();
   const gap = medianGap();
   if (dslw != null && dslw >= Math.max(2, gap + 1)) html += `<div class="banner"><div>${dslw} days since your last session — your usual is about ${gap}.</div></div>`;
+  const bcs = bodyCompStalled();
+  if (bcs) html += `<div class="banner warn"><div>${esc(bcs)}</div></div>`;
 
   // protein quick-logger
   const pt = proteinToday(), ptgt = S.profile.proteinTarget || 0;
@@ -1461,6 +1528,8 @@ function renderHelp() {
       ${d("Progression", "Double progression: beat last time's reps within the range. Hit the <b>top</b> of the range at an easy RPE → for a bodyweight ladder it suggests a harder variation; for a real weight (once Dumbbells are on in More → Equipment) it auto-steps the load and resets reps to the bottom of the range for you.")}
       ${d("Momentum", "Clear a lift's top range two sessions running → \"cruising,\" it pushes you to load up instead of creeping one rep at a time.")}
       ${d("Stall", "No new best in 3 sessions on a lift → it suggests swapping or deloading <i>that</i> lift so you don't grind a plateau.")}
+      ${d("Measurement stall", "Log a chest/shoulder/arm/thigh measurement in More → Weekly review that hasn't moved in ~3 weeks despite real training (4+ sessions hitting it) → that muscle's priority in session generation gets bumped automatically. Closes the loop between your logged progress and what gets trained, instead of that being a manual weekly re-tune.")}
+      ${d("Weight/waist stall", "If weight and waist/belly both sit flat for ~3 weeks despite consistent training, Today shows a banner — but it doesn't touch your training. Fat loss stalling is a nutrition signal, not a reason to add more sets.")}
       ${d("Deload", "A lighter recovery week, auto-flagged after shoulder pain 3+ days, low energy 3+ days, or ~4 weeks training straight. Cuts volume ~40%, holds load.")}
       ${d("Recovery nudge", "5+ days in a row → suggests a mobility day.")}
     </div>

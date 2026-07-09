@@ -348,6 +348,10 @@ const EXERCISES = {
  */
 const MUSCLE_TARGETS = { back: 2.5, chest: 2.5, rear_delts: 3, side_delts: 3.5, biceps: 2.5, triceps: 3.5, legs: 3.5 };
 const MUSCLE_DISPLAY = { back: "Back", chest: "Chest", rear_delts: "Rear Delts", side_delts: "Side Delts", biceps: "Biceps", triceps: "Triceps", legs: "Legs" };
+// Which logged measurement is a real-world proxy for a muscle's actual growth, if any exists.
+// Back and rear delts have no circumference measurement in the app, so they're never
+// stall-boosted by this — there's nothing to measure them against.
+const MUSCLE_MEASUREMENT = { chest: "chest", side_delts: "shoulders", biceps: "armAvg", legs: "thighAvg" };
 
 /* Curated pool for the opening posture/scapula block — always 3 of these 4, rotated so it's
  * not the identical trio every time. Separate from PREHAB_ROUTINE/MOBILITY_ROUTINE (app.js),
