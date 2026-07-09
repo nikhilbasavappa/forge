@@ -666,7 +666,12 @@ function prescribe(exId) {
     // possible number in the range, not a real calibration attempt. Still self-corrects:
     // clear it clean and next time's target moves toward the top.
     const base = ex.load === "time" ? ex.target.sec : Math.round((ex.target.lo + ex.target.hi) / 2);
-    const baseNote = ex.load === "time" ? "Baseline — see how long you can hold"
+    // Prehab is a movement-quality drill, not a strength lift — "see how many you can do" and
+    // "beat last time" both imply a max-effort/progressive-overload framing that doesn't apply
+    // to wall slides, scap push-ups, etc. It gets fixed, steady quality-focused language instead
+    // of the baseline/beat-last-time notes below, regardless of load type or session history.
+    const baseNote = ex.cat === "prehab" ? "Controlled reps through a full, comfortable range — quality over quantity"
+      : ex.load === "time" ? "Baseline — see how long you can hold"
       : (ex.load === "reps" || !ex.load) ? "Baseline — see how many clean reps you can do"
       : "Baseline — find a clean working weight";
     let baseSets = setsCount, basePerSet = Array.from({ length: setsCount }, () => ({ reps: base, last: null, load: null }));
@@ -712,7 +717,8 @@ function prescribe(exId) {
   const hasLoadOption = ex.load === "band" || ex.load === "weight" || isNumericLoad(ex);
   const harderText = ex.ladder ? "move up to a harder variation" : (hasLoadOption ? "add load" : "add tempo or pause reps");
   let note;
-  if (rd && rd.band === "low") note = "Low readiness — one fewer set, but push the ones you do";
+  if (ex.cat === "prehab") note = "Controlled reps through a full, comfortable range — quality over quantity";
+  else if (rd && rd.band === "low") note = "Low readiness — one fewer set, but push the ones you do";
   else if (mo) note = rd && rd.band === "primed" ? `Primed + cruising — add a set and ${harderText}` : `Cruising — ${harderText}`;
   else if (anyAdd) note = steppedTo != null ? `Cleared the range — stepped up to ${steppedTo}lb` : `Cleared the range — ${harderText}`;
   else note = ex.load === "time" ? "Beat last time's hold" : "Beat last time's reps";
@@ -1323,11 +1329,17 @@ function renderRunner() {
     let tgt;
     if (cardio) tgt = cardioTarget(exId, ex);
     else if (timed) tgt = p.last != null ? `hold — beat ${fmtDur(p.last)}` : "hold — hit ‘time it’ to run the timer";
-    else {
+    else if (ex.cat === "prehab") {
+      // No progression framing at all for prehab — it's not building toward a max or a load,
+      // it's a fixed quality target every time.
+      tgt = `${p.reps} — controlled, full range`;
+    } else {
       // "+load" only makes sense when a numeric load exists to add to — a laddered bodyweight
-      // exercise (push-ups, pull-ups, squats) clears its range into a harder ladder rung, not
-      // a heavier weight it doesn't have.
-      const addLoadText = p.addLoad ? (ex.ladder ? " · clears to next rung" : " +load") : "";
+      // exercise (push-ups, pull-ups, squats) clears its range into a harder ladder rung, and a
+      // bodyweight exercise with no ladder either (prone row, bird dog) has no load OR rung to
+      // step to, so the only honest "harder" is tempo/pause, same three-way split as the note text.
+      const hasLoadOption = ex.load === "band" || ex.load === "weight" || isNumericLoad(ex);
+      const addLoadText = p.addLoad ? (ex.ladder ? " · clears to next rung" : (hasLoadOption ? " +load" : " · add tempo or pause reps")) : "";
       tgt = `${p.reps}${p.loadStepped ? ` · stepped to ${p.load}lb (was ${p.prevLoad})` : addLoadText}`;
       // Effort guidance on real strength work — the number alone doesn't say how hard to push it,
       // and evidence points to proximity-to-failure mattering more than the exact rep count.
