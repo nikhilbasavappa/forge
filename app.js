@@ -279,7 +279,11 @@ function assignedVariation(exId) {
   const ex = EXERCISES[exId];
   return ex && ex.ladder ? ex.ladder[assignedRung(exId)] : null;
 }
-function isTimedVariation(v) { return !!(v && /\(time\)|dead hang/i.test(v)); }
+// A rung is timed either because the whole exercise is (ex.load === "time" — e.g. every rung
+// of the standalone dead_hang routine, even ones whose text doesn't literally say "(time)" or
+// "dead hang", like "Active scapular hang") or because a normally rep-based ladder has ONE
+// timed rung called out by name (chinup_prog/pullup_prog's "Dead hang (time)" starting rung).
+function isTimedVariation(v, ex) { return !!(ex && ex.load === "time") || !!(v && /\(time\)|dead hang/i.test(v)); }
 function setRung(exId, rung) {
   const ex = EXERCISES[exId]; if (!ex || !ex.ladder) return;
   S.ladders[exId] = Math.max(0, Math.min(ex.ladder.length - 1, rung));
@@ -1285,7 +1289,7 @@ function renderRunner() {
   // The app ASSIGNS the rung/variation — the user doesn't choose it (they can only bump it up/down).
   const rung = ex.ladder ? assignedRung(exId) : 0;
   const curVar = ex.ladder ? assignedVariation(exId) : null;
-  const varTimed = isTimedVariation(curVar);
+  const varTimed = isTimedVariation(curVar, ex);
   const effLoad = varTimed ? "time" : ex.load;
   const timed = effLoad === "time";
   const cardio = effLoad === "cardio";
@@ -1678,7 +1682,7 @@ function advanceLadders(entries) {
     // Same reasoning as prescribe()'s hitTop: the last set is meant to be pushed near failure,
     // so only the earlier sets need to have stayed comfortable for this to count as a clean clear.
     const clearedRpe = e.sets.slice(0, -1).every((s) => !s.rpe || s.rpe <= 8);
-    const advance = isTimedVariation(ex.ladder[r]) ? top >= 45 : (top >= ex.target.hi && clearedRpe);
+    const advance = isTimedVariation(ex.ladder[r], ex) ? top >= 45 : (top >= ex.target.hi && clearedRpe);
     if (advance) { S.ladders[e.exId] = r + 1; leveled.push(ex.ladder[r + 1].replace(/\s*\(time\)/i, "")); }
   });
   return leveled;
