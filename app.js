@@ -582,7 +582,11 @@ function cardioTarget(exId, ex) {
 // Capped so a low-rep-ceiling movement (e.g. an early pull-up rung) can't balloon into 8+ sets.
 // Skipped for time/cardio work, which isn't measured in reps.
 function applyVolumeFloor(setsCount, perSet, ex) {
-  if (ex.load === "time" || ex.load === "cardio" || !perSet.length) return { setsCount, perSet };
+  // Excludes prehab specifically (corrective, not a muscle-building movement by design — a
+  // 1-set thoracic rotation shouldn't triple into 3 sets chasing an arbitrary rep total).
+  // Core stays IN scope even without a muscle tag: it's a real training priority, not
+  // corrective filler, and deserves the same volume guarantee as tagged strength work.
+  if (ex.cat === "prehab" || ex.load === "time" || ex.load === "cardio" || !perSet.length) return { setsCount, perSet };
   const out = [...perSet];
   let sets = setsCount, total = out.reduce((s, p) => s + (+p.reps || 0), 0), added = 0;
   while (total < 20 && added < 3) {
@@ -1331,13 +1335,19 @@ function captureRun(exId) {
     const reps = row.querySelector('[data-f="reps"]'), load = row.querySelector('[data-f="load"]'), dist = row.querySelector('[data-f="dist"]'), rpe = row.querySelector('[data-f="rpe"]');
     const i = +reps.dataset.set;
     const done = row.querySelector(".setdone")?.classList.contains("on") || false;
-    let repsNum = reps.value.trim() === "" ? null : Number(reps.value);
+    // Clamp to non-negative and reject garbage (NaN from e.g. a pasted non-numeric value) --
+    // a negative rep count isn't just wrong, it can silently corrupt PR tracking (any nonzero
+    // number, negative included, is truthy and could win an empty "best so far" comparison).
+    const cleanNum = (v) => { if (v == null || v === "") return null; const n = Math.max(0, Number(v)); return isFinite(n) ? n : null; };
+    let repsNum = cleanNum(reps.value);
     // A "done"-marked set with no typed number logs the prescribed target — tapping done = "I did this set".
     if (repsNum == null && done && pres && pres.perSet[i] && pres.perSet[i].reps != null) repsNum = pres.perSet[i].reps;
+    let loadVal = load && load.value != null && load.value.trim() !== "" ? load.value.trim() : null;
+    if (loadVal != null && isFinite(+loadVal) && +loadVal < 0) loadVal = null; // reject a negative numeric load; leave band-name text alone
     sets[i] = {
       reps: repsNum,
-      load: load && load.value != null && load.value.trim() !== "" ? load.value.trim() : null,
-      dist: dist && dist.value.trim() !== "" ? Number(dist.value) : null,
+      load: loadVal,
+      dist: dist ? cleanNum(dist.value) : null,
       unit: null,
       rpe: rpe && rpe.value !== "" ? Number(rpe.value) : null,
       done,
@@ -1417,7 +1427,7 @@ function renderExercise(exId) {
   const pts = [];
   hist.forEach((h) => { const top = Math.max(0, ...h.sets.map((s) => +s.reps || 0)); if (top) pts.push({ x: pts.length, y: top }); });
   let pr = null;
-  hist.forEach((h) => h.sets.forEach((s) => { const r = +s.reps || 0; if (r && (!pr || r > pr.reps)) pr = { reps: r, load: s.load }; }));
+  hist.forEach((h) => h.sets.forEach((s) => { const r = +s.reps || 0; if (r > 0 && (!pr || r > pr.reps)) pr = { reps: r, load: s.load }; }));
   const rows = hist.slice().reverse().map((h) => {
     const sets = h.sets.map((s) => `${s.reps ?? "?"}${s.load ? "@" + s.load : ""}${s.rpe ? " (RPE" + s.rpe + ")" : ""}`).join(", ");
     return `<div class="row small" style="padding:8px 0;border-top:1px solid var(--line)"><span class="muted">${prettyDate(h.date)}${h.variation ? " · " + esc(h.variation) : ""}${h.tag ? ` · ${esc(h.tag)}` : ""}</span><span>${esc(sets)}</span></div>`;
