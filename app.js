@@ -732,16 +732,18 @@ function prescribe(exId) {
   }
   // "Add load" only makes physical sense when a numeric load actually exists (dumbbells on,
   // or a genuine weight-tracked movement). For a bodyweight exercise with no ladder either
-  // (prone row, bird dog, etc.) there's no mechanical way to progress difficulty in-app at
-  // all beyond more reps/sets — telling someone to "add load" to a bodyweight movement they
-  // have no external weight for is advice that can't actually be followed.
+  // (prone row, bird dog, etc.) there's no mechanical way to progress difficulty in-app beyond
+  // more reps/sets — and "add tempo or pause reps" was fabricated advice for a feature that
+  // doesn't exist (the app tracks neither). The real lever for that case is the rep-range cycle
+  // itself (reps reset to lo and climb back to hi, computed above) — that already runs
+  // automatically with no user action, so there's nothing else honest to suggest.
   const hasLoadOption = ex.load === "band" || ex.load === "weight" || isNumericLoad(ex);
-  const harderText = ex.ladder ? "move up to a harder variation" : (hasLoadOption ? "add load" : "add tempo or pause reps");
+  const harderText = ex.ladder ? "move up to a harder variation" : (hasLoadOption ? "add load" : "");
   let note;
   if (ex.cat === "prehab") note = "Controlled reps through a full, comfortable range — quality over quantity";
   else if (rd && rd.band === "low") note = "Low readiness — one fewer set, but push the ones you do";
-  else if (mo) note = rd && rd.band === "primed" ? `Primed + cruising — add a set and ${harderText}` : `Cruising — ${harderText}`;
-  else if (anyAdd) note = steppedTo != null ? `Cleared the range — stepped up to ${steppedTo}lb` : `Cleared the range — ${harderText}`;
+  else if (mo) note = rd && rd.band === "primed" ? `Primed + cruising — add a set${harderText ? " and " + harderText : ""}` : (harderText ? `Cruising — ${harderText}` : "Cruising");
+  else if (anyAdd) note = steppedTo != null ? `Cleared the range — stepped up to ${steppedTo}lb` : (harderText ? `Cleared the range — ${harderText}` : "Cleared the range");
   else note = ex.load === "time" ? "Beat last time's hold" : "Beat last time's reps";
   let finalSets = setsCount, finalPerSet = perSet;
   ({ setsCount: finalSets, perSet: finalPerSet } = applyVolumeFloor(finalSets, finalPerSet, ex));
@@ -783,6 +785,10 @@ function todaysCheckin() { return S.checkins.find((c) => c.date === today()) || 
 // Suggestion: looks at last performance + today's readiness.
 function suggest(exId) {
   const ex = EXERCISES[exId];
+  // Prehab isn't a progression-tracked lift — "stalled"/"cruising" commentary doesn't apply
+  // to a movement-quality drill with a fixed target, so it gets no badge at all (matches the
+  // note text already suppressed for prehab elsewhere).
+  if (ex.cat === "prehab") return { lvl: "acc", text: "" };
   const last = lastEntry(exId);
   const ci = todaysCheckin();
   // readiness gates
@@ -796,7 +802,7 @@ function suggest(exId) {
   if (rd && rd.band === "low") return { lvl: "warn", text: "Low readiness: cut sets, keep form" };
   if (momentum(exId, ex)) {
     const hasLoadOption = ex.load === "band" || ex.load === "weight" || isNumericLoad(ex);
-    const text = ex.ladder ? "Cruising: move up to a harder variation" : (hasLoadOption ? "Cruising: push load" : "Cruising: add tempo or pause reps");
+    const text = ex.ladder ? "Cruising: move up to a harder variation" : (hasLoadOption ? "Cruising: push load" : "Cruising");
     return { lvl: "good", text };
   }
   if (!last) return { lvl: "acc", text: "No history yet" };
@@ -1222,7 +1228,7 @@ function renderToday() {
       html += `<div class="ex">
         <div class="row"><div class="name tappable" data-exhist="${exId}">${esc(ex.name)} ›</div><span class="pill">${targetLabel(ex)}</span></div>
         ${cueBlock(ex)}
-        <div class="meta">${sg.text === "No history yet" ? "" : `<span class="pill ${sg.lvl}">${esc(sg.text)}</span>`}${swapped}${demoLink(ex)}</div>
+        <div class="meta">${!sg.text || sg.text === "No history yet" ? "" : `<span class="pill ${sg.lvl}">${esc(sg.text)}</span>`}${swapped}${demoLink(ex)}</div>
         ${last ? `<div class="lastnote">${esc(last)}</div>` : ""}
       </div>`;
     }
@@ -1362,11 +1368,12 @@ function renderRunner() {
       tgt = `${p.reps} — controlled, full range`;
     } else {
       // "+load" only makes sense when a numeric load exists to add to — a laddered bodyweight
-      // exercise (push-ups, pull-ups, squats) clears its range into a harder ladder rung, and a
-      // bodyweight exercise with no ladder either (prone row, bird dog) has no load OR rung to
-      // step to, so the only honest "harder" is tempo/pause, same three-way split as the note text.
+      // exercise (push-ups, pull-ups, squats) clears its range into a harder ladder rung. A
+      // bodyweight exercise with no ladder either (prone row, bird dog) has no load or rung to
+      // step to — no fabricated "add tempo or pause reps" suffix, since neither is a tracked
+      // feature; the rep-range reset-and-reclimb (computed above) is the real, automatic lever.
       const hasLoadOption = ex.load === "band" || ex.load === "weight" || isNumericLoad(ex);
-      const addLoadText = p.addLoad ? (ex.ladder ? " · clears to next rung" : (hasLoadOption ? " +load" : " · add tempo or pause reps")) : "";
+      const addLoadText = p.addLoad ? (ex.ladder ? " · clears to next rung" : (hasLoadOption ? " +load" : "")) : "";
       tgt = `${p.reps}${p.loadStepped ? ` · stepped to ${p.load}lb (was ${p.prevLoad})` : addLoadText}`;
       // Effort guidance on real strength work — the number alone doesn't say how hard to push it,
       // and evidence points to proximity-to-failure mattering more than the exact rep count.
