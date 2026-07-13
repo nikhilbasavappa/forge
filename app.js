@@ -649,6 +649,24 @@ function prescribe(exId) {
     const baseNote = ex.target.sets > 1 ? "Hard effort — log your strokes" : "Steady pace — log your strokes";
     return { setsCount: ex.target.sets, perSet: Array.from({ length: ex.target.sets }, () => ({ reps: ex.target.sec })), note: lastCardio(exId) ? "Beat last stroke count in the same time" : baseNote };
   }
+  // Prehab is movement-quality/mobility work, not a lift to progressively overload — it isn't
+  // "stalled" or "cruising," those concepts don't apply to a stretch or a scapular drill with a
+  // fixed target. This has to be a full early return, not just different wording on the note:
+  // momentum()/isStalled() were still being COMPUTED and FED INTO the set count below (a
+  // "primed + cruising" day silently added an extra set to a stretch) and the rep target was
+  // still running the same climb-to-hi/reset-to-lo progression math as a real lift, just with
+  // neutral text slapped on top. None of that machinery runs for prehab now — sets are always
+  // the exercise's own count (deload still trims them, a rough day is a rough day regardless of
+  // exercise type), reps are always the midpoint of its range, full stop.
+  if (ex.cat === "prehab") {
+    const setsCount = deloadActive() ? Math.max(1, Math.ceil(ex.target.sets * 0.6)) : ex.target.sets;
+    const reps = Math.round((ex.target.lo + ex.target.hi) / 2);
+    return {
+      setsCount,
+      perSet: Array.from({ length: setsCount }, () => ({ reps, load: null })),
+      note: "Controlled reps through a full, comfortable range — quality over quantity",
+    };
+  }
   const last = lastEntry(exId);
   const deload = deloadActive();
   const rd = readiness();
@@ -687,12 +705,7 @@ function prescribe(exId) {
     // possible number in the range, not a real calibration attempt. Still self-corrects:
     // clear it clean and next time's target moves toward the top.
     const base = ex.load === "time" ? ex.target.sec : Math.round((ex.target.lo + ex.target.hi) / 2);
-    // Prehab is a movement-quality drill, not a strength lift — "see how many you can do" and
-    // "beat last time" both imply a max-effort/progressive-overload framing that doesn't apply
-    // to wall slides, scap push-ups, etc. It gets fixed, steady quality-focused language instead
-    // of the baseline/beat-last-time notes below, regardless of load type or session history.
-    const baseNote = ex.cat === "prehab" ? "Controlled reps through a full, comfortable range — quality over quantity"
-      : ex.load === "time" ? "Baseline — see how long you can hold"
+    const baseNote = ex.load === "time" ? "Baseline — see how long you can hold"
       : (ex.load === "reps" || !ex.load) ? "Baseline — see how many clean reps you can do"
       : "Baseline — find a clean working weight";
     let baseSets = setsCount, basePerSet = Array.from({ length: setsCount }, () => ({ reps: base, last: null, load: null }));
@@ -740,8 +753,7 @@ function prescribe(exId) {
   const hasLoadOption = ex.load === "band" || ex.load === "weight" || isNumericLoad(ex);
   const harderText = ex.ladder ? "move up to a harder variation" : (hasLoadOption ? "add load" : "");
   let note;
-  if (ex.cat === "prehab") note = "Controlled reps through a full, comfortable range — quality over quantity";
-  else if (rd && rd.band === "low") note = "Low readiness — one fewer set, but push the ones you do";
+  if (rd && rd.band === "low") note = "Low readiness — one fewer set, but push the ones you do";
   else if (mo) note = rd && rd.band === "primed" ? `Primed + cruising — add a set${harderText ? " and " + harderText : ""}` : (harderText ? `Cruising — ${harderText}` : "Cruising");
   else if (anyAdd) note = steppedTo != null ? `Cleared the range — stepped up to ${steppedTo}lb` : (harderText ? `Cleared the range — ${harderText}` : "Cleared the range");
   else note = ex.load === "time" ? "Beat last time's hold" : "Beat last time's reps";
