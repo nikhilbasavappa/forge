@@ -299,7 +299,12 @@ function setRung(exId, rung) {
   S._m = Date.now(); save();
 }
 function isBodyweightMode() { return typeof BW_SWAPS !== "undefined" && S.swaps && S.swaps.band_curl === BW_SWAPS.band_curl && S.swaps.band_press === BW_SWAPS.band_press; }
-function dumbbellMode(ex) { return S.equipment && S.equipment.dumbbells && ex.load === "band" && /curl|press|fly|row|squat|rdl|pressdown/i.test(ex.name + " " + (ex.cat || "")); }
+// noDumbbellMode marks exercises whose resistance direction a dumbbell (gravity only) can't
+// replicate at all — anchor-resisted diagonal/lateral paths like band_fly's low-to-high
+// crossover or pallof's side anchor. The regex alone can't tell "this band move happens to
+// share a verb with a real dumbbell exercise" from "this band move IS a real dumbbell
+// exercise," so exercises that fail that distinction opt out explicitly.
+function dumbbellMode(ex) { return S.equipment && S.equipment.dumbbells && ex.load === "band" && !ex.noDumbbellMode && /curl|press|fly|row|squat|rdl|pressdown/i.test(ex.name + " " + (ex.cat || "")); }
 // Numeric-load exercises are the ones the weight-progression engine can auto-step:
 // dumbbell-mode band moves once dumbbells are on, plus anything already tracked in lb (backpack curl).
 function isNumericLoad(ex) { return dumbbellMode(ex) || ex.load === "weight"; }
@@ -1076,7 +1081,7 @@ function demoLink(ex) {
 // rather than trimming the text itself, so a safety note buried in the 2nd/3rd sentence
 // (e.g. "stop if the shoulder feels unstable") is never silently lost.
 function cueBlock(ex, text) {
-  text = text ?? ex.cue;
+  text = text ?? activeCue(ex);
   if (!ex.q) return `<div class="cue">${esc(text)}</div>`;
   const id = "cue-" + Math.random().toString(36).slice(2, 9);
   return `<div class="cue clamped" id="${id}">${esc(text)}</div><button class="linkbtn cuemore" data-cuetoggle="${id}">More ›</button>`;
@@ -1098,15 +1103,22 @@ function warmupHint(exId) {
   const suggestion = lastLoad && isFinite(+lastLoad) ? `around ${Math.round(+lastLoad / 2)}lb` : "very light";
   return `<div class="banner">Warm up first — 1–2 easy sets at ${suggestion}, ~12 reps, nothing near failure. Not logged below, just get the joint moving before the working sets.</div>`;
 }
-function equipList(ex) { return (ex && Array.isArray(ex.equip)) ? ex.equip.slice() : []; }
+// A dumbbell-mode-eligible exercise (band_curl, rdl, etc.) switches its LOAD TRACKING to lb
+// automatically, but the equip/setup/cue text was left describing the band setup verbatim
+// regardless — "stand on a band" is actively wrong once you're holding a dumbbell instead.
+// These three helpers are the single place that resolves which text is actually current.
+function equipList(ex) { return (ex && Array.isArray(ex.equip)) ? (dumbbellMode(ex) && ex.equipDumbbell ? ex.equipDumbbell : ex.equip).slice() : []; }
+function activeSetup(ex) { return (dumbbellMode(ex) && ex.setupDumbbell) ? ex.setupDumbbell : (ex && ex.setup); }
+function activeCue(ex) { return (dumbbellMode(ex) && ex.cueDumbbell) ? ex.cueDumbbell : (ex && ex.cue); }
 function equipLine(ex) {
   const eq = equipList(ex);
   if (!eq.length) return "";
   return `<div class="equipline"><span class="eqk">Equipment</span>${eq.map((e) => `<span class="eqchip">${esc(e)}</span>`).join("")}</div>`;
 }
 function setupLine(ex) {
-  if (!ex || !ex.setup) return "";
-  return `<div class="setupline"><span class="eqk">Setup</span><span class="eqv">${esc(ex.setup)}</span></div>`;
+  const setup = activeSetup(ex);
+  if (!setup) return "";
+  return `<div class="setupline"><span class="eqk">Setup</span><span class="eqv">${esc(setup)}</span></div>`;
 }
 // All equipment the (resolved, swap-aware) session needs today — deduped, order-preserved.
 function sessionEquip(sess) {
@@ -1500,7 +1512,7 @@ function swapReason(exId, reason) {
   if (reason === "how") {
     res.innerHTML = `<div class="howto">
       ${equipLine(ex)}${setupLine(ex)}
-      <div class="cue" style="margin-top:6px">${esc(ex.cue)}</div>
+      <div class="cue" style="margin-top:6px">${esc(activeCue(ex))}</div>
       <div style="margin-top:8px">${demoLink(ex) || `<span class="tiny muted">No video — follow the setup above.</span>`}</div>
       <div class="tiny muted" style="margin-top:6px">Not swapped. Do it as described, or pick another reason.</div>
     </div>`;
@@ -1557,7 +1569,7 @@ function renderExercise(exId) {
     <button class="btn ghost sm" id="ex-back" style="margin:8px 0 6px">← Back</button>
     <div class="card">
       <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${targetLabel(ex)}</span></div>
-      <div class="cue">${esc(ex.cue)}</div>
+      <div class="cue">${esc(activeCue(ex))}</div>
       <div class="meta">${demoLink(ex)}</div>
     </div>
     <div class="card">

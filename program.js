@@ -99,6 +99,11 @@ const EXERCISES = {
     equip: ["Bands"],
     setup: "Sit on the floor, loop a band around your feet (or anchor it low), a handle in each hand, arms extended.",
     cue: "Anchor low. Row to the hips, retract shoulder blades. Keep shoulders back at full extension.",
+    // Seated + feet-anchored is band-specific; the dumbbell equivalent is a standing bent-over
+    // row, not the same body position — different setup/cue, not a find-replace of "band".
+    equipDumbbell: ["Dumbbells"],
+    setupDumbbell: "Hinge forward at the hips, flat back, a dumbbell in each hand hanging straight down.",
+    cueDumbbell: "Hinged over, flat back. Row the dumbbells to the hips, retract the shoulder blades. Keep shoulders back at full extension.",
     q: "seated band row exercise"
   },
 
@@ -116,6 +121,9 @@ const EXERCISES = {
     equip: ["Bands", "Anchor point"],
     setup: "Anchor a band behind you at chest height (or lie on it), a handle in each hand starting low by the ribs.",
     cue: "Press LOW-TO-HIGH — hands start low, drive up and together — to bias the upper chest (your lagging area). Adduct across the chest at lockout, control the return.",
+    // Diagonal, anchor-resisted path with adduction at lockout — same mismatch as band_fly.
+    // Gravity can't replicate "low-to-high, hands together" lying down; stays band-only.
+    noDumbbellMode: true,
     q: "low to high band chest press upper chest"
   },
   pike_pushup: {
@@ -137,6 +145,9 @@ const EXERCISES = {
     equip: ["Bands", "Anchor point"],
     setup: "Anchor a band low behind you, a handle in each hand, arms open at chest height with a slight elbow bend.",
     cue: "Anchor LOW behind you and arc the hands up-and-together (low-to-high) to hit the upper chest. Slight fixed elbow bend, squeeze the chest, control the stretch. Isolates the pecs without loading the triceps.",
+    // Diagonal, anchor-resisted crossover — a dumbbell (gravity only) can't pull the hands
+    // together at the top the way a band anchored behind you can. Stays band-only.
+    noDumbbellMode: true,
     q: "low to high band chest fly upper chest"
   },
   lateral_raise: {
@@ -151,6 +162,11 @@ const EXERCISES = {
     equip: ["Bands"],
     setup: "Stand on the middle of a band, a handle in each hand in front of your thighs, palms facing your body.",
     cue: "Pull the handles straight up along your body, leading with the elbows, to about chest height — no higher, that's where the shoulder risk starts. Pause, lower under control. A second angle on the side delts, different loading curve than the lateral raise.",
+    // A straight vertical pull along the body — gravity resists this the same way a band does,
+    // so it translates cleanly, just with different setup wording.
+    equipDumbbell: ["Dumbbells"],
+    setupDumbbell: "Hold a dumbbell in each hand in front of your thighs, palms facing your body.",
+    cueDumbbell: "Pull the dumbbells straight up along your body, leading with the elbows, to about chest height — no higher, that's where the shoulder risk starts. Pause, lower under control. A second angle on the side delts, different loading curve than the lateral raise.",
     q: "band upright row exercise"
   },
   band_curl: {
@@ -158,6 +174,9 @@ const EXERCISES = {
     equip: ["Bands"],
     setup: "Stand on the middle of a band, a handle in each hand, palms forward, elbows pinned.",
     cue: "Elbows pinned, full range, squeeze hard at the top, slow descent. 8–15 reps near failure, add load over time. Builds the peak / long head. Use dumbbells once you have them — bands run out of tension here.",
+    equipDumbbell: ["Dumbbells"],
+    setupDumbbell: "Hold a dumbbell in each hand, palms forward, elbows pinned.",
+    cueDumbbell: "Elbows pinned, full range, squeeze hard at the top, slow descent. 8–15 reps near failure, add load over time. Builds the peak / long head.",
     q: "dumbbell biceps curl exercise"
   },
   hammer_curl: {
@@ -189,6 +208,9 @@ const EXERCISES = {
     equip: ["Bands or backpack"],
     setup: "Stand on the middle of a band holding the handles at your thighs (or hold a loaded backpack), feet hip-width.",
     cue: "Hips back, soft knees, flat back. Load the hamstrings, stand tall via the glutes.",
+    equipDumbbell: ["Dumbbells"],
+    setupDumbbell: "Hold a dumbbell in each hand in front of your thighs, feet hip-width.",
+    cueDumbbell: "Hips back, soft knees, flat back. Load the hamstrings, stand tall via the glutes.",
     q: "romanian deadlift hip hinge form"
   },
   calf_raise: {
@@ -212,6 +234,9 @@ const EXERCISES = {
     equip: ["Bands", "Anchor point"],
     setup: "Anchor a band at chest height to your side; hold it at your chest with both hands, step out for tension.",
     cue: "Band anchored to the side. Press straight out, resist rotation. Brace the trunk.",
+    // Lateral anti-rotation resistance from a side anchor — gravity can't replicate a dumbbell
+    // pulling you sideways. Stays band-only regardless of dumbbell ownership.
+    noDumbbellMode: true,
     q: "pallof press exercise"
   },
   plank: {
