@@ -287,13 +287,6 @@ const EXERCISES = {
     cue: "Underhand grip (palms toward you) — loads the biceps hard plus the back. Lead the chest to the bar, control the lower. Your main biceps builder until you have load.",
     q: "chin up progression beginner"
   },
-  prone_row: {
-    name: "Prone Row / Bat Wing", cat: "pull", muscle: "rear_delts", load: "reps", target: { sets: 3, lo: 10, hi: 15 },
-    equip: ["Floor"],
-    setup: "Lie face-down, arms hanging toward the floor (elevate your chest on a bed edge for more range).",
-    cue: "Face-down, arms hanging. Row the elbows up high and squeeze the shoulder blades for a count. Rear delts and mid-back without a band.",
-    q: "prone row bat wing rear delt exercise"
-  },
   diamond_pushup: {
     name: "Diamond Push-Up (triceps)", cat: "push", muscle: "triceps", load: "reps", target: { sets: 3, lo: 6, hi: 12 },
     equip: ["Floor"],
@@ -396,9 +389,9 @@ const PAIN_AREAS = ["Winged scapula / L shoulder blade", "L shoulder (old disloc
  * Used by the one-tap swap (e.g., a movement aggravates the shoulder). */
 const ALTS = {
   pullup_prog: ["chinup_prog", "door_row", "band_row"],
-  trx_row: ["door_row", "band_row", "prone_row"],
-  door_row: ["band_row", "prone_row", "trx_row"],
-  band_row: ["door_row", "prone_row", "trx_row"],
+  trx_row: ["door_row", "band_row"],
+  door_row: ["band_row", "trx_row"],
+  band_row: ["door_row", "trx_row"],
   lateral_raise: ["band_upright_row", "prone_ytw"],
   band_upright_row: ["lateral_raise", "prone_ytw"],
   band_press: ["pushup_prog", "band_fly", "deep_pushup"],
@@ -412,10 +405,9 @@ const ALTS = {
   hammer_curl: ["backpack_curl", "chinup_prog", "band_curl"],
   chinup_prog: ["band_curl", "backpack_curl", "pullup_prog"],
   backpack_curl: ["band_curl", "chinup_prog"],
-  face_pull: ["prone_row", "band_pull_apart", "prone_ytw"],
-  band_pull_apart: ["prone_ytw", "prone_row", "face_pull"],
-  prone_row: ["face_pull", "prone_ytw"],
-  prone_ytw: ["face_pull", "prone_row", "band_pull_apart"],
+  face_pull: ["band_pull_apart", "prone_ytw"],
+  band_pull_apart: ["prone_ytw", "face_pull"],
+  prone_ytw: ["face_pull", "band_pull_apart"],
   goblet_squat: ["split_squat"],
   split_squat: ["goblet_squat", "sl_rdl"],
   rdl: ["sl_rdl", "goblet_squat"],
@@ -441,7 +433,12 @@ const BW_SWAPS = {
   band_fly: "deep_pushup",
   band_pressdown: "diamond_pushup",
   band_pull_apart: "prone_ytw",
-  face_pull: "prone_row",
+  // prone_row (the old "lie face-down, arms hanging" fallback) required an elevated edge
+  // (bed/bench) to hang the arms with any real range of motion — on flat floor, or improvised
+  // as a standing bent-over arm-swing with no load, it's not a real exercise, just gravity
+  // acting on ~5-8% of bodyweight through a token range. prone_ytw is genuinely floor-only
+  // (no elevation needed, sweeps the whole arm through Y/T/W) so it's the honest fallback here.
+  face_pull: "prone_ytw",
   band_curl: "chinup_prog",
   hammer_curl: "backpack_curl",
   pallof: "bird_dog",

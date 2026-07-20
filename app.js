@@ -407,18 +407,19 @@ const MUSCLE_POOLS = (() => {
   return pools;
 })();
 // Most bodyweight-mode swap targets (chin-ups, split-stance work) are genuinely different
-// movements worth keeping in rotation regardless of equipment. These two are pure equipment-gap
-// fillers, not real variety, so they only earn a slot when there's genuinely no alternative:
-// - backpack_curl: the same curl as hammer_curl with a backpack standing in for a dumbbell.
-// - prone_row: the bodyweight substitute for face_pull/band_pull_apart when there's no band —
-//   but bands are assumed always available everywhere else in this app (no "I don't have bands"
-//   toggle exists outside all-or-nothing Bodyweight mode), so it should never have been
-//   competing in the normal rotation at all. Its own equip: ["Floor"] is also dishonest — the
-//   cue needs the arms hanging freely against gravity, which in practice needs an elevated edge
-//   (bed/bench), not flat floor.
-const EQUIP_SUBSTITUTE_ONLY = new Set(["backpack_curl", "prone_row"]);
+// movements worth keeping in rotation regardless of equipment. backpack_curl is the one
+// exception — it's not a distinct movement, it's the same curl as hammer_curl with a backpack
+// standing in for a dumbbell, so it only earns a slot when there's genuinely no alternative.
+const EQUIP_SUBSTITUTE_ONLY = new Set(["backpack_curl"]);
 function equipFilteredPool(pool) {
-  if (isBodyweightMode()) return pool;
+  if (isBodyweightMode()) {
+    // band_pull_apart and face_pull now both fall back to the same bodyweight substitute
+    // (prone_ytw — the only genuinely floor-only rear-delt option; see BW_SWAPS). Without
+    // deduping by the RESOLVED id, a muscle that earns 2 priority slots could pick both raw
+    // ids and end up with the identical exercise listed twice in the same session.
+    const seen = new Set();
+    return pool.filter((id) => { const r = resolveEx(id); if (seen.has(r)) return false; seen.add(r); return true; });
+  }
   const filtered = pool.filter((id) => !EQUIP_SUBSTITUTE_ONLY.has(id));
   return filtered.length ? filtered : pool;
 }
@@ -524,7 +525,12 @@ function generateSession() {
   const shoulderPain = ci && (ci.pains || []).some((p) => p.sev >= 2 && /scapula|shoulder/i.test(p.area));
   const reasons = [];
 
-  const prehabEx = pickLRU(PREHAB_BLOCK_POOL, 3);
+  // In bodyweight mode, prone_ytw is ALSO the rear-delt strength fallback (band_pull_apart and
+  // face_pull both resolve to it — see BW_SWAPS). Picking it here independently for Prehab too
+  // risks the same exercise appearing twice in one session under two different framings, so it
+  // sits out of the prehab pool specifically while it's doing double duty as a strength swap.
+  const prehabPool = isBodyweightMode() ? PREHAB_BLOCK_POOL.filter((id) => id !== "prone_ytw") : PREHAB_BLOCK_POOL;
+  const prehabEx = pickLRU(prehabPool, 3);
 
   let candidates = Object.keys(MUSCLE_TARGETS);
   if (shoulderPain) {
@@ -583,10 +589,10 @@ function generateSession() {
   });
 
   const corePool = Object.keys(EXERCISES).filter((id) => EXERCISES[id].cat === "core");
-  const coreEx = pickLRU(corePool, 2);
+  const coreEx = pickLRU(equipFilteredPool(corePool), 2);
 
   const condPool = Object.keys(EXERCISES).filter((id) => EXERCISES[id].cat === "cond");
-  const condEx = rd.band === "low" ? [] : pickLRU(condPool, 1);
+  const condEx = rd.band === "low" ? [] : pickLRU(equipFilteredPool(condPool), 1);
   if (rd.band === "low") reasons.push("Low readiness — conditioning skipped, rest it out.");
 
   const blocks = [
