@@ -633,14 +633,23 @@ function strokeRate(strokes, timeSec) {
   if (!strokes || !timeSec) return null;
   return `${Math.round((strokes / timeSec) * 60)} spm`;
 }
-function lastCardio(exId) {
+// setIndex, when passed, looks up that SPECIFIC round's prior stroke count by position rather
+// than always the first logged set — interval output naturally decays round to round (that's
+// normal, expected fatigue, not a problem to fix), so comparing round 6 against round 1's
+// number is backwards. Omitted (row_steady, one continuous piece) keeps the old behavior.
+function lastCardio(exId, setIndex) {
   const l = lastEntry(exId); if (!l) return null;
-  const set = l.entry.sets.find((s) => s.dist != null); return set ? { dist: +set.dist, time: +set.reps || null } : null;
+  const set = setIndex != null ? l.entry.sets[setIndex] : l.entry.sets.find((s) => s.dist != null);
+  return (set && set.dist != null) ? { dist: +set.dist, time: +set.reps || null } : null;
 }
-function cardioTarget(exId, ex) {
-  const lc = lastCardio(exId);
-  if (lc) { const p = strokeRate(lc.dist, lc.time || ex.target.sec); return `beat ${lc.dist} strokes in ${fmtDur(ex.target.sec)}${p ? " · " + p : ""}`; }
-  return `${fmtDur(ex.target.sec)} — log your strokes`;
+function cardioTarget(exId, ex, setIndex, setsCount) {
+  const lc = lastCardio(exId, setIndex);
+  // Repeating the identical text on every one of N identical-looking rows reads as the app not
+  // tracking anything at all — label which round it is so it's clear each row IS distinct, even
+  // when (as on a first session) there's nothing yet to compare it against.
+  const roundLabel = setsCount > 1 ? `Round ${setIndex + 1} of ${setsCount} — ` : "";
+  if (lc) { const p = strokeRate(lc.dist, lc.time || ex.target.sec); return `${roundLabel}beat ${lc.dist} strokes in ${fmtDur(ex.target.sec)}${p ? " · " + p : ""}`; }
+  return `${roundLabel}${fmtDur(ex.target.sec)} — log your strokes`;
 }
 
 // Safety net: a rep-based prescription under ~20 total reps isn't much of a stimulus
@@ -1397,7 +1406,7 @@ function renderRunner() {
     const cellVal = cardio ? (ev && ev.dist != null ? ev.dist : "") : (ev && ev.load != null ? ev.load : (p.load ?? ""));
     const rpeVal = ev && ev.rpe ? ev.rpe : "";
     let tgt;
-    if (cardio) tgt = cardioTarget(exId, ex);
+    if (cardio) tgt = cardioTarget(exId, ex, i, pres.setsCount);
     else if (timed && ex.ladder && ex.load !== "time") {
       // A timed ladder rung on an otherwise reps-based exercise (chinup_prog/pullup_prog's
       // dead hang start) — not a genuine timed exercise that's meant to keep climbing forever,
