@@ -326,10 +326,17 @@ function medianGap() {
   const gaps = []; for (let i = 1; i < dates.length; i++) gaps.push(daysBetween(dates[i - 1], dates[i]));
   gaps.sort((a, b) => a - b); return gaps[Math.floor(gaps.length / 2)] || 3;
 }
-function exHistory(exId) {
+// variation, when passed, restricts history to entries logged under that SAME ladder rung.
+// Without this, a laddered exercise's history is contaminated across rungs that don't even
+// share units — e.g. pullup_prog's "Dead hang" rung logs SECONDS held, but "Scapular pull" (the
+// very next rung) logs REPS. Without filtering, the day you advance rungs, the app reads last
+// session's 45 seconds-held as if it were "45 reps you did last time" on the new movement,
+// which corrupts momentum/isStalled/the beat-last-time target and the 20-rep volume floor all
+// at once (a 45 "rep" baseline blows past any real rep target instantly).
+function exHistory(exId, variation) {
   const out = [];
   S.workouts.forEach((w) => {
-    const e = w.entries.find((x) => x.exId === exId); if (!e) return;
+    const e = w.entries.find((x) => x.exId === exId && (!variation || x.variation === variation)); if (!e) return;
     const sets = e.sets.filter((s) => s.reps != null); if (!sets.length) return;
     const top = Math.max(...sets.map((s) => +s.reps || 0));
     const topSet = sets.find((s) => +s.reps === top) || sets[0];
@@ -346,14 +353,14 @@ function exHistory(exId) {
 }
 function momentum(exId, ex) {
   if (ex.load === "time" || ex.load === "cardio") return false;
-  const h = exHistory(exId); if (h.length < 2) return false;
+  const h = exHistory(exId, ex.ladder ? assignedVariation(exId) : undefined); if (h.length < 2) return false;
   return h.slice(-2).every((s) => s.top >= ex.target.hi && (!s.rpe || s.rpe <= 8));
 }
 // Stalled = no rep PR AND no load increase across 3 sessions — weight-aware so a session
 // right after a load step-up (reps intentionally reset to the low end) isn't misread as a plateau.
 function isStalled(exId, ex) {
   if (ex.load === "time" || ex.load === "cardio") return false;
-  const h = exHistory(exId); if (h.length < 3) return false;
+  const h = exHistory(exId, ex.ladder ? assignedVariation(exId) : undefined); if (h.length < 3) return false;
   const w = h.slice(-3);
   const noRepPR = Math.max(...w.map((s) => s.top)) <= w[0].top;
   const loadRose = w.some((s, i) => i > 0 && s.load != null && w[i - 1].load != null && s.load > w[i - 1].load);
@@ -672,7 +679,7 @@ function prescribe(exId) {
       note: "Controlled reps through a full, comfortable range — quality over quantity",
     };
   }
-  const last = lastEntry(exId);
+  const last = lastEntry(exId, ex.ladder ? assignedVariation(exId) : undefined);
   const deload = deloadActive();
   const rd = readiness();
   const mo = momentum(exId, ex);
@@ -781,14 +788,14 @@ function insertActivitySorted(a) {
 }
 // Looks across real sessions AND off-day prehab/mobility — an exercise done on a rest day
 // still sets the bar for "last time" and still feeds progression next time it's prescribed.
-function lastEntry(exId) {
+function lastEntry(exId, variation) {
   let best = null;
   for (let i = S.workouts.length - 1; i >= 0; i--) {
-    const e = S.workouts[i].entries.find((x) => x.exId === exId);
+    const e = S.workouts[i].entries.find((x) => x.exId === exId && (!variation || x.variation === variation));
     if (e) { best = { date: S.workouts[i].date, m: S.workouts[i]._m || 0, entry: e }; break; }
   }
   for (let i = (S.activity || []).length - 1; i >= 0; i--) {
-    const e = S.activity[i].entries.find((x) => x.exId === exId);
+    const e = S.activity[i].entries.find((x) => x.exId === exId && (!variation || x.variation === variation));
     if (e) {
       const cand = { date: S.activity[i].date, m: S.activity[i]._m || 0, entry: e };
       if (!best || cand.date > best.date || (cand.date === best.date && cand.m > best.m)) best = cand;
@@ -806,7 +813,7 @@ function suggest(exId) {
   // to a movement-quality drill with a fixed target, so it gets no badge at all (matches the
   // note text already suppressed for prehab elsewhere).
   if (ex.cat === "prehab") return { lvl: "acc", text: "" };
-  const last = lastEntry(exId);
+  const last = lastEntry(exId, ex.ladder ? assignedVariation(exId) : undefined);
   const ci = todaysCheckin();
   // readiness gates
   const rd = readiness();
@@ -1151,7 +1158,8 @@ function validateProgram() {
   return problems;
 }
 function lastLabel(exId) {
-  const l = lastEntry(exId);
+  const ex = EXERCISES[exId];
+  const l = lastEntry(exId, ex && ex.ladder ? assignedVariation(exId) : undefined);
   if (!l) return null;
   const cardioSet = l.entry.sets.find((s) => s.dist != null);
   if (cardioSet) {
