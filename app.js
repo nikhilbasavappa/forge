@@ -406,12 +406,17 @@ const MUSCLE_POOLS = (() => {
   for (const [id, ex] of Object.entries(EXERCISES)) if (ex.muscle) (pools[ex.muscle] = pools[ex.muscle] || []).push(id);
   return pools;
 })();
-// Most bodyweight-mode swap targets (chin-ups, floor rows, split-stance work) are genuinely
-// different movements worth keeping in rotation regardless of equipment. Backpack Curl is the
-// one exception — it's not a distinct movement, it's the same curl as hammer_curl with a
-// backpack standing in for a dumbbell, so it only earns a slot when there's no real weight
-// to use. Once you're not in bodyweight mode, drop it from the pool.
-const EQUIP_SUBSTITUTE_ONLY = new Set(["backpack_curl"]);
+// Most bodyweight-mode swap targets (chin-ups, split-stance work) are genuinely different
+// movements worth keeping in rotation regardless of equipment. These two are pure equipment-gap
+// fillers, not real variety, so they only earn a slot when there's genuinely no alternative:
+// - backpack_curl: the same curl as hammer_curl with a backpack standing in for a dumbbell.
+// - prone_row: the bodyweight substitute for face_pull/band_pull_apart when there's no band —
+//   but bands are assumed always available everywhere else in this app (no "I don't have bands"
+//   toggle exists outside all-or-nothing Bodyweight mode), so it should never have been
+//   competing in the normal rotation at all. Its own equip: ["Floor"] is also dishonest — the
+//   cue needs the arms hanging freely against gravity, which in practice needs an elevated edge
+//   (bed/bench), not flat floor.
+const EQUIP_SUBSTITUTE_ONLY = new Set(["backpack_curl", "prone_row"]);
 function equipFilteredPool(pool) {
   if (isBodyweightMode()) return pool;
   const filtered = pool.filter((id) => !EQUIP_SUBSTITUTE_ONLY.has(id));
