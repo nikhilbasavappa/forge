@@ -681,16 +681,22 @@ function prescribe(exId) {
     const baseNote = ex.target.sets > 1 ? "Hard effort — log your strokes" : "Steady pace — log your strokes";
     return { setsCount: ex.target.sets, perSet: Array.from({ length: ex.target.sets }, () => ({ reps: ex.target.sec })), note: lastCardio(exId) ? "Beat last stroke count in the same time" : baseNote };
   }
-  // Prehab is movement-quality/mobility work, not a lift to progressively overload — it isn't
-  // "stalled" or "cruising," those concepts don't apply to a stretch or a scapular drill with a
-  // fixed target. This has to be a full early return, not just different wording on the note:
-  // momentum()/isStalled() were still being COMPUTED and FED INTO the set count below (a
+  // Prehab, and REPS-based mobility work (cat_cow — the only one), are movement-quality drills,
+  // not a lift to progressively overload — "stalled"/"cruising" doesn't apply to a stretch or a
+  // scapular drill with a fixed target. (showRpe elsewhere already groups prehab+mobility for
+  // the same underlying reason — this exemption originally only checked "prehab" and missed
+  // that cat_cow could still trigger "Stalled 3 sessions" through the exact same gap.) TIME-based
+  // mobility (dead_hang, doorway_pec, hip_flexor, deep_squat_hold) is deliberately excluded from
+  // this exemption — holding a stretch longer as flexibility improves is real, legitimate
+  // progression (same pattern already used for plank/hollow_hold), and those were never exposed
+  // to the stalled/cruising bug anyway since momentum()/isStalled() already bail on
+  // ex.load === "time". This has to be a full early return, not just different wording on the
+  // note: momentum()/isStalled() were still being COMPUTED and FED INTO the set count below (a
   // "primed + cruising" day silently added an extra set to a stretch) and the rep target was
   // still running the same climb-to-hi/reset-to-lo progression math as a real lift, just with
-  // neutral text slapped on top. None of that machinery runs for prehab now — sets are always
-  // the exercise's own count (deload still trims them, a rough day is a rough day regardless of
-  // exercise type), reps are always the midpoint of its range, full stop.
-  if (ex.cat === "prehab") {
+  // neutral text slapped on top. None of that machinery runs here now — sets are always the
+  // exercise's own count (deload still trims them), reps are always the midpoint of its range.
+  if (ex.cat === "prehab" || (ex.cat === "mobility" && ex.load !== "time")) {
     const setsCount = deloadActive() ? Math.max(1, Math.ceil(ex.target.sets * 0.6)) : ex.target.sets;
     const reps = Math.round((ex.target.lo + ex.target.hi) / 2);
     return {
@@ -737,9 +743,14 @@ function prescribe(exId) {
     // possible number in the range, not a real calibration attempt. Still self-corrects:
     // clear it clean and next time's target moves toward the top.
     const base = ex.load === "time" ? ex.target.sec : Math.round((ex.target.lo + ex.target.hi) / 2);
+    // A plain band (no dumbbell mode) has adjustable TENSION, not a "weight" to find — telling
+    // someone to "find a clean working weight" for a resistance band doesn't match what they're
+    // actually holding. isNumericLoad(ex) covers both a genuine weight-tracked exercise
+    // (backpack_curl) and a band exercise currently running in dumbbell mode.
     const baseNote = ex.load === "time" ? "Baseline — see how long you can hold"
       : (ex.load === "reps" || !ex.load) ? "Baseline — see how many clean reps you can do"
-      : "Baseline — find a clean working weight";
+      : (ex.load === "weight" || isNumericLoad(ex)) ? "Baseline — find a clean working weight"
+      : "Baseline — find a band you feel by the last few reps";
     let baseSets = setsCount, basePerSet = Array.from({ length: setsCount }, () => ({ reps: base, last: null, load: null }));
     ({ setsCount: baseSets, perSet: basePerSet } = applyVolumeFloor(baseSets, basePerSet, ex));
     return { setsCount: baseSets, perSet: basePerSet, note: baseNote };
@@ -782,8 +793,12 @@ function prescribe(exId) {
   // doesn't exist (the app tracks neither). The real lever for that case is the rep-range cycle
   // itself (reps reset to lo and climb back to hi, computed above) — that already runs
   // automatically with no user action, so there's nothing else honest to suggest.
-  const hasLoadOption = ex.load === "band" || ex.load === "weight" || isNumericLoad(ex);
-  const harderText = ex.ladder ? "move up to a harder variation" : (hasLoadOption ? "add load" : "");
+  // A plain band (not in dumbbell mode) has tension to firm up, not a numeric "load" to add —
+  // isNumericLoad(ex) is true for a genuine weight-tracked exercise or a band running in
+  // dumbbell mode; a band outside that is bandOnly and gets band-appropriate phrasing instead.
+  const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex);
+  const bandOnly = ex.load === "band" && !isNumericLoad(ex);
+  const harderText = ex.ladder ? "move up to a harder variation" : hasNumericLoad ? "add load" : bandOnly ? "use a firmer band" : "";
   let note;
   if (rd && rd.band === "low") note = "Low readiness — one fewer set, but push the ones you do";
   else if (mo) note = rd && rd.band === "primed" ? `Primed + cruising — add a set${harderText ? " and " + harderText : ""}` : (harderText ? `Cruising — ${harderText}` : "Cruising");
@@ -829,10 +844,12 @@ function todaysCheckin() { return S.checkins.find((c) => c.date === today()) || 
 // Suggestion: looks at last performance + today's readiness.
 function suggest(exId) {
   const ex = EXERCISES[exId];
-  // Prehab isn't a progression-tracked lift — "stalled"/"cruising" commentary doesn't apply
-  // to a movement-quality drill with a fixed target, so it gets no badge at all (matches the
-  // note text already suppressed for prehab elsewhere).
-  if (ex.cat === "prehab") return { lvl: "acc", text: "" };
+  // Prehab, and REPS-based mobility (cat_cow), aren't progression-tracked lifts — "stalled"/
+  // "cruising" commentary doesn't apply to a movement-quality drill with a fixed target, so
+  // they get no badge at all (matches the note text already suppressed elsewhere). TIME-based
+  // mobility (dead_hang, doorway_pec, etc.) is excluded from this — it gets a real, useful
+  // "Target Xs" / "Xs reached" badge further below, same as plank/hollow_hold.
+  if (ex.cat === "prehab" || (ex.cat === "mobility" && ex.load !== "time")) return { lvl: "acc", text: "" };
   const last = lastEntry(exId, ex.ladder ? assignedVariation(exId) : undefined);
   const ci = todaysCheckin();
   // readiness gates
@@ -845,8 +862,9 @@ function suggest(exId) {
   if (isStalled(exId, ex)) return { lvl: "warn", text: "Stalled 3 sessions: swap or deload this lift" };
   if (rd && rd.band === "low") return { lvl: "warn", text: "Low readiness: cut sets, keep form" };
   if (momentum(exId, ex)) {
-    const hasLoadOption = ex.load === "band" || ex.load === "weight" || isNumericLoad(ex);
-    const text = ex.ladder ? "Cruising: move up to a harder variation" : (hasLoadOption ? "Cruising: push load" : "Cruising");
+    const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex);
+    const bandOnly = ex.load === "band" && !isNumericLoad(ex);
+    const text = ex.ladder ? "Cruising: move up to a harder variation" : hasNumericLoad ? "Cruising: push load" : bandOnly ? "Cruising: use a firmer band" : "Cruising";
     return { lvl: "good", text };
   }
   if (!last) return { lvl: "acc", text: "No history yet" };
@@ -865,9 +883,11 @@ function suggest(exId) {
   // the earlier sets need to have stayed comfortable.
   const lowRpe = sets.slice(0, -1).every((s) => !s.rpe || s.rpe <= 8);
   if (allHit && lowRpe) {
-    // A laddered bodyweight exercise never has a numeric load to add — only bands/weights do.
-    const hasLoadOption = ex.load === "band" || ex.load === "weight" || isNumericLoad(ex);
-    const text = ex.ladder ? "Top of range: move up to a harder variation" : (hasLoadOption ? "Top of range: +load or +1 rep/set" : "Top of range: +1 rep or +1 set");
+    // A laddered bodyweight exercise never has a numeric load to add — only bands/weights do,
+    // and a plain (non-dumbbell-mode) band has tension to firm up, not a numeric load.
+    const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex);
+    const bandOnly = ex.load === "band" && !isNumericLoad(ex);
+    const text = ex.ladder ? "Top of range: move up to a harder variation" : hasNumericLoad ? "Top of range: +load or +1 rep/set" : bandOnly ? "Top of range: firmer band or +1 rep/set" : "Top of range: +1 rep or +1 set";
     return { lvl: "good", text };
   }
   if (topReps < ex.target.lo) return { lvl: "warn", text: `Below ${ex.target.lo} reps: hold or regress` };
@@ -1414,9 +1434,10 @@ function renderRunner() {
       tgt = "hold ~30s, good form — 45s clean on any set clears this rung";
     }
     else if (timed) tgt = p.last != null ? `hold — beat ${fmtDur(p.last)}` : "hold — hit ‘time it’ to run the timer";
-    else if (ex.cat === "prehab") {
-      // No progression framing at all for prehab — it's not building toward a max or a load,
-      // it's a fixed quality target every time.
+    else if (ex.cat === "prehab" || ex.cat === "mobility") {
+      // No progression framing at all for prehab/mobility — it's not building toward a max or
+      // a load, it's a fixed quality target every time. (Only reaches non-timed mobility work —
+      // cat_cow — since the other mobility exercises are load:"time" and hit the branch above.)
       tgt = `${p.reps} — controlled, full range`;
     } else {
       // "+load" only makes sense when a numeric load exists to add to — a laddered bodyweight
@@ -1424,8 +1445,10 @@ function renderRunner() {
       // bodyweight exercise with no ladder either (prone row, bird dog) has no load or rung to
       // step to — no fabricated "add tempo or pause reps" suffix, since neither is a tracked
       // feature; the rep-range reset-and-reclimb (computed above) is the real, automatic lever.
-      const hasLoadOption = ex.load === "band" || ex.load === "weight" || isNumericLoad(ex);
-      const addLoadText = p.addLoad ? (ex.ladder ? " · clears to next rung" : (hasLoadOption ? " +load" : "")) : "";
+      // A plain band (not dumbbell mode) has tension, not a numeric load, to add.
+      const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex);
+      const bandOnly = ex.load === "band" && !isNumericLoad(ex);
+      const addLoadText = p.addLoad ? (ex.ladder ? " · clears to next rung" : hasNumericLoad ? " +load" : bandOnly ? " · use a firmer band" : "") : "";
       tgt = `${p.reps}${p.loadStepped ? ` · stepped to ${p.load}lb (was ${p.prevLoad})` : addLoadText}`;
       // Effort guidance on real strength work — the number alone doesn't say how hard to push it,
       // and evidence points to proximity-to-failure mattering more than the exact rep count.
@@ -1458,8 +1481,8 @@ function renderRunner() {
       ${ex.ladder && timed ? `<div class="cue">Hold with good form as long as you can — no reps. Tap ‘time it’ to run the clock.</div>` : cueBlock(ex)}
       ${equipLine(ex)}${setupLine(ex)}
       ${warmupHint(exId)}
-      <div class="meta">${ex.cat === "prehab" ? "" : `<span class="pill ${prescribeLvl(pres)}">${esc(pres.note)}</span>`}${demoLink(ex)}<button class="linkbtn" id="run-swap">Swap →</button></div>
-      ${lastLabel(exId) ? `<div class="lastnote">${esc(lastLabel(exId))}${ex.cat === "prehab" ? "" : " → aim to beat it"}</div>` : ""}
+      <div class="meta">${ex.cat === "prehab" || (ex.cat === "mobility" && ex.load !== "time") ? "" : `<span class="pill ${prescribeLvl(pres)}">${esc(pres.note)}</span>`}${demoLink(ex)}<button class="linkbtn" id="run-swap">Swap →</button></div>
+      ${lastLabel(exId) ? `<div class="lastnote">${esc(lastLabel(exId))}${ex.cat === "prehab" || (ex.cat === "mobility" && ex.load !== "time") ? "" : " → aim to beat it"}</div>` : ""}
       ${ladderCtl}
       <div class="sets">${setsHead}${rows}</div>
     </div>
