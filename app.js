@@ -1907,6 +1907,13 @@ function finishRun() {
   if (!entries.length) { toast("Mark a set done (tap its number) so it saves"); return; }
   const leveled = advanceLadders(entries);
   const date = RUN.date || today();
+  // Today's session (and its "reasons" text — "never trained, prioritized" etc.) is generated
+  // once and cached so it doesn't reshuffle on every re-render. But that cache is a snapshot of
+  // daysSinceMuscle() at generation time — logging ANY session (especially a backdated one,
+  // whose entire point is correcting the record) changes what that reasoning should say, and
+  // without invalidating the cache here, the stale "never trained" text would keep showing
+  // until the calendar rolled over or someone manually hit Regenerate.
+  S.todaySession = null;
   if (RUN.isPrehab) {
     const type = RUN.activityType;
     const title = RUN.title;
