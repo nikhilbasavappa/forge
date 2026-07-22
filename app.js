@@ -306,8 +306,17 @@ function isBodyweightMode() { return typeof BW_SWAPS !== "undefined" && S.swaps 
 // exercise," so exercises that fail that distinction opt out explicitly.
 function dumbbellMode(ex) { return S.equipment && S.equipment.dumbbells && ex.load === "band" && !ex.noDumbbellMode && /curl|press|fly|row|squat|rdl|pressdown|raise/i.test(ex.name + " " + (ex.cat || "")); }
 // Numeric-load exercises are the ones the weight-progression engine can auto-step:
-// dumbbell-mode band moves once dumbbells are on, plus anything already tracked in lb (backpack curl).
-function isNumericLoad(ex) { return dumbbellMode(ex) || ex.load === "weight"; }
+// dumbbell-mode band moves once dumbbells are on, anything already tracked in lb (backpack
+// curl), OR a laddered bodyweight exercise that's reached its "Weighted" terminal rung
+// (Weighted pull-up, Weighted chin-up, Weighted/band push-up) — at that point there's a real
+// external load to progress even though ex.load stays "reps" for the rest of the ladder, and
+// without this the app just kept prescribing plain rep counts forever with no way to log or
+// step the added weight once someone actually reached that rung.
+function isNumericLoad(ex, exId) {
+  if (dumbbellMode(ex) || ex.load === "weight") return true;
+  if (exId && ex.ladder && /weighted/i.test(assignedVariation(exId) || "")) return true;
+  return false;
+}
 function loadStep(ex) { return (S.profile && +S.profile.dumbbellStep) || 5; }
 
 /* ---------- smart engine: readiness, momentum, stalls, cadence ---------- */
@@ -749,18 +758,21 @@ function prescribe(exId) {
     const base = ex.load === "time" ? ex.target.sec : Math.round((ex.target.lo + ex.target.hi) / 2);
     // A plain band (no dumbbell mode) has adjustable TENSION, not a "weight" to find — telling
     // someone to "find a clean working weight" for a resistance band doesn't match what they're
-    // actually holding. isNumericLoad(ex) covers both a genuine weight-tracked exercise
-    // (backpack_curl) and a band exercise currently running in dumbbell mode.
+    // actually holding. isNumericLoad(ex, exId) is checked BEFORE the plain ex.load === "reps"
+    // check (not after) so it also catches a laddered bodyweight exercise's Weighted terminal
+    // rung on its very first session — ex.load is "reps" there too, same as every earlier rung,
+    // so checking ex.load alone would always fall into "how many reps" with zero mention of
+    // picking a starting weight, even though there's a real weight to hold.
     const baseNote = ex.load === "time" ? "Baseline — see how long you can hold"
+      : isNumericLoad(ex, exId) ? "Baseline — find a clean working weight"
       : (ex.load === "reps" || !ex.load) ? "Baseline — see how many clean reps you can do"
-      : (ex.load === "weight" || isNumericLoad(ex)) ? "Baseline — find a clean working weight"
       : "Baseline — find a band you feel by the last few reps";
     let baseSets = setsCount, basePerSet = Array.from({ length: setsCount }, () => ({ reps: base, last: null, load: null }));
     ({ setsCount: baseSets, perSet: basePerSet } = applyVolumeFloor(baseSets, basePerSet, ex));
     return { setsCount: baseSets, perSet: basePerSet, note: baseNote };
   }
   const lastSets = last.entry.sets.filter((s) => s.reps != null || s.load != null);
-  const numericLoad = isNumericLoad(ex);
+  const numericLoad = isNumericLoad(ex, exId);
   const step = loadStep(ex);
   const perSet = [];
   let anyAdd = false, steppedTo = null;
@@ -798,11 +810,15 @@ function prescribe(exId) {
   // itself (reps reset to lo and climb back to hi, computed above) — that already runs
   // automatically with no user action, so there's nothing else honest to suggest.
   // A plain band (not in dumbbell mode) has tension to firm up, not a numeric "load" to add —
-  // isNumericLoad(ex) is true for a genuine weight-tracked exercise or a band running in
+  // isNumericLoad(ex, exId) is true for a genuine weight-tracked exercise or a band running in
   // dumbbell mode; a band outside that is bandOnly and gets band-appropriate phrasing instead.
-  const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex);
-  const bandOnly = ex.load === "band" && !isNumericLoad(ex);
-  const harderText = ex.ladder ? "move up to a harder variation" : hasNumericLoad ? "add load" : bandOnly ? "use a firmer band" : "";
+  const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex, exId);
+  const bandOnly = ex.load === "band" && !isNumericLoad(ex, exId);
+  // "Move up to a harder variation" is impossible at a ladder's LAST rung — there's nowhere
+  // higher to go. At that point (Weighted pull-up/chin-up, Weighted/band push-up) the real
+  // lever is adding more load, which is exactly what hasNumericLoad now correctly detects there.
+  const atLastRung = ex.ladder && assignedRung(exId) >= ex.ladder.length - 1;
+  const harderText = (ex.ladder && !atLastRung) ? "move up to a harder variation" : hasNumericLoad ? "add load" : bandOnly ? "use a firmer band" : "";
   let note;
   if (rd && rd.band === "low") note = "Low readiness — one fewer set, but push the ones you do";
   else if (mo) note = rd && rd.band === "primed" ? `Primed + cruising — add a set${harderText ? " and " + harderText : ""}` : (harderText ? `Cruising — ${harderText}` : "Cruising");
@@ -872,9 +888,11 @@ function suggest(exId) {
   if (isStalled(exId, ex)) return { lvl: "warn", text: "Stalled 3 sessions: swap or deload this lift" };
   if (rd && rd.band === "low") return { lvl: "warn", text: "Low readiness: cut sets, keep form" };
   if (momentum(exId, ex)) {
-    const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex);
-    const bandOnly = ex.load === "band" && !isNumericLoad(ex);
-    const text = ex.ladder ? "Cruising: move up to a harder variation" : hasNumericLoad ? "Cruising: push load" : bandOnly ? "Cruising: use a firmer band" : "Cruising";
+    const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex, exId);
+    const bandOnly = ex.load === "band" && !isNumericLoad(ex, exId);
+    // Same terminal-rung fix as prescribe() — "move up" is impossible on the last rung.
+    const atLastRung = ex.ladder && assignedRung(exId) >= ex.ladder.length - 1;
+    const text = (ex.ladder && !atLastRung) ? "Cruising: move up to a harder variation" : hasNumericLoad ? "Cruising: push load" : bandOnly ? "Cruising: use a firmer band" : "Cruising";
     return { lvl: "good", text };
   }
   if (!last) return { lvl: "acc", text: "No history yet" };
@@ -895,9 +913,10 @@ function suggest(exId) {
   if (allHit && lowRpe) {
     // A laddered bodyweight exercise never has a numeric load to add — only bands/weights do,
     // and a plain (non-dumbbell-mode) band has tension to firm up, not a numeric load.
-    const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex);
-    const bandOnly = ex.load === "band" && !isNumericLoad(ex);
-    const text = ex.ladder ? "Top of range: move up to a harder variation" : hasNumericLoad ? "Top of range: +load or +1 rep/set" : bandOnly ? "Top of range: firmer band or +1 rep/set" : "Top of range: +1 rep or +1 set";
+    const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex, exId);
+    const bandOnly = ex.load === "band" && !isNumericLoad(ex, exId);
+    const atLastRung = ex.ladder && assignedRung(exId) >= ex.ladder.length - 1;
+    const text = (ex.ladder && !atLastRung) ? "Top of range: move up to a harder variation" : hasNumericLoad ? "Top of range: +load or +1 rep/set" : bandOnly ? "Top of range: firmer band or +1 rep/set" : "Top of range: +1 rep or +1 set";
     return { lvl: "good", text };
   }
   if (topReps < ex.target.lo) return { lvl: "warn", text: `Below ${ex.target.lo} reps: hold or regress` };
@@ -1410,7 +1429,7 @@ function startRun(sess, dateStr) {
   // The first real external-load exercise of the session gets a one-line warm-up reminder
   // (see renderRunner) — not a tracked/logged set, just a nudge, so it doesn't need its own
   // data model or touch progression math. Only relevant once real weight is involved.
-  const warmupFor = list.find((id) => isNumericLoad(EXERCISES[id])) || null;
+  const warmupFor = list.find((id) => isNumericLoad(EXERCISES[id], id)) || null;
   RUN = { title: sess.title, rawList, list, idx: 0, startTs: Date.now(), data: {}, date: dateStr || null, warmupFor };
   saveRun(); renderRunner();
 }
@@ -1448,7 +1467,12 @@ function renderRunner() {
   const rung = ex.ladder ? assignedRung(exId) : 0;
   const curVar = ex.ladder ? assignedVariation(exId) : null;
   const varTimed = isTimedVariation(curVar, ex);
-  const effLoad = varTimed ? "time" : ex.load;
+  // Same idea as varTimed, for the OTHER direction: a laddered bodyweight exercise's final rung
+  // (Weighted pull-up/chin-up, Weighted/band push-up) has a real load to add and track, even
+  // though ex.load stays "reps" for every other rung. Without this, the input stayed a plain
+  // "BW" placeholder forever, with nowhere to even log the weight you strapped on.
+  const varWeighted = !!(ex.ladder && !varTimed && /weighted/i.test(curVar || ""));
+  const effLoad = varTimed ? "time" : varWeighted ? "weight" : ex.load;
   const timed = effLoad === "time";
   const cardio = effLoad === "cardio";
   const displayName = ex.ladder ? curVar.replace(/\s*\(time\)/i, "") : ex.name;
@@ -1458,7 +1482,7 @@ function renderRunner() {
   // Persistent column headers — the inputs' placeholder text disappears the moment a value
   // is pre-filled (baseline, carried-forward, or a stepped load), which is most of the time.
   const col1Head = cardio || timed ? "sec" : "reps";
-  const col2Head = cardio ? "strokes" : timed ? "" : (ex.load === "reps" || !ex.load ? "bw" : (dumbbellMode(ex) ? "lb" : ex.load === "band" ? "band" : "lb"));
+  const col2Head = cardio ? "strokes" : timed ? "" : (effLoad === "reps" || !effLoad ? "bw" : (dumbbellMode(ex) ? "lb" : effLoad === "band" ? "band" : "lb"));
   const setsHead = `<div class="setrow sethead"><span></span><span class="colhead">${esc(col1Head)}</span><span class="colhead">${esc(col2Head)}</span><span class="colhead">${showRpe ? "rpe" : ""}</span></div>`;
   let rows = "";
   for (let i = 0; i < pres.setsCount; i++) {
@@ -1490,9 +1514,11 @@ function renderRunner() {
       // step to — no fabricated "add tempo or pause reps" suffix, since neither is a tracked
       // feature; the rep-range reset-and-reclimb (computed above) is the real, automatic lever.
       // A plain band (not dumbbell mode) has tension, not a numeric load, to add.
-      const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex);
-      const bandOnly = ex.load === "band" && !isNumericLoad(ex);
-      const addLoadText = p.addLoad ? (ex.ladder ? " · clears to next rung" : hasNumericLoad ? " +load" : bandOnly ? " · use a firmer band" : "") : "";
+      const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex, exId);
+      const bandOnly = ex.load === "band" && !isNumericLoad(ex, exId);
+      // Same terminal-rung fix as prescribe()/suggest() — no "next rung" exists at the last one.
+      const atLastRung = ex.ladder && rung >= ex.ladder.length - 1;
+      const addLoadText = p.addLoad ? ((ex.ladder && !atLastRung) ? " · clears to next rung" : hasNumericLoad ? " +load" : bandOnly ? " · use a firmer band" : "") : "";
       tgt = `${p.reps}${p.loadStepped ? ` · stepped to ${p.load}lb (was ${p.prevLoad})` : addLoadText}`;
       // Effort guidance on real strength work — the number alone doesn't say how hard to push it,
       // and evidence points to proximity-to-failure mattering more than the exact rep count.
@@ -1505,11 +1531,12 @@ function renderRunner() {
     // (timed holds, prehab/mobility, and normal reps/load) without duplicating the logic three times.
     if (ex.side && !cardio) tgt += " · each side";
     const cellHtml = timed ? `<button class="qbtn holdbtn" data-hold="${i}">⏱ time it</button>` : runnerLoadCell({ ...ex, load: effLoad }, i, cellVal);
-    // Interval-style cardio (setsCount > 1 — row_intervals, not row_steady's single continuous
-    // piece) gets an actual countdown + auto-chained rest instead of a plain editable number —
-    // "30s hard / 60s easy" should be something the app runs, not just cue text you self-time.
-    const cardioInterval = cardio && pres.setsCount > 1;
-    const col1Cell = cardioInterval
+    // Any cardio exercise gets an actual countdown instead of a plain editable number — both
+    // row_intervals (30s hard, auto-chains a 60s rest between rounds) and row_steady (one
+    // continuous 5:00 piece, chains the generic post-set rest same as finishing any other set)
+    // should be something the app times for you, not just cue text you self-time against a
+    // watch. Only skips the countdown for a value already typed/carried forward from history.
+    const col1Cell = cardio
       ? `<button class="qbtn holdbtn" data-interval="${i}">▶ Start ${fmtDur(ex.target.sec)}</button>`
       : `<input data-set="${i}" data-f="reps" inputmode="numeric" placeholder="${cardio || timed ? "sec" : "reps"}" value="${esc(repsVal)}" />`;
     rows += `<div class="setrow">
