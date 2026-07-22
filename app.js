@@ -100,6 +100,15 @@ function mergeStates(a, b) {
   const ac = {};
   [...(a.activity || []), ...(b.activity || [])].forEach((x) => { const e = ac[x.id]; if (!e || (x._m || 0) >= (e._m || 0)) ac[x.id] = x; });
   out.activity = Object.values(ac).sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : x.id - y.id));
+  // Same cache-invalidation problem finishRun() already had to fix, for the sync path: the
+  // cached todaySession (and its "reasons" text — "never trained", etc.) is a snapshot of
+  // daysSinceMuscle() at generation time. out starts as structuredClone(a) and nothing above
+  // touches todaySession, so a device could generate/cache "never trained" for a muscle, sync in
+  // a real session for that exact muscle from ANOTHER device (updating out.workouts correctly),
+  // and still keep showing the stale cached reasoning indefinitely — the underlying data is
+  // right, the cache just never knows to invalidate. Always drop it here; it's just a same-render
+  // optimization, so losing it costs one extra regenerate, not correctness.
+  out.todaySession = null;
   // Ladder rungs are monotonic progress, not a setting — last-writer-wins is wrong here.
   // _m is one timestamp for the WHOLE state blob, bumped by any save on either device (a
   // measurement, a walk, anything), completely unrelated to whether ladders changed. Wholesale-
