@@ -942,17 +942,25 @@ function toast(msg) {
 }
 
 /* ---------- protein ---------- */
-function todaysNutrition() { return S.nutrition.find((n) => n.date === today()) || null; }
-function proteinToday() { const n = todaysNutrition(); return n ? (+n.protein || 0) : 0; }
-function addProtein(g) {
-  const i = S.nutrition.findIndex((n) => n.date === today());
+// Which date the protein widget is currently logging against — a late-night shake after
+// midnight is really "yesterday's" protein, not today's, and there was previously no way to
+// say that at all (addProtein/setProtein were hardcoded to today()). Resets to today on a full
+// page load; persists across re-renders within a session so toggling to "Yesterday" sticks
+// long enough to actually log against it.
+let proteinLogDate = null;
+function todaysNutrition(date) { return S.nutrition.find((n) => n.date === (date || today())) || null; }
+function proteinToday(date) { const n = todaysNutrition(date); return n ? (+n.protein || 0) : 0; }
+function addProtein(g, date) {
+  const d = date || today();
+  const i = S.nutrition.findIndex((n) => n.date === d);
   if (i >= 0) S.nutrition[i] = { ...S.nutrition[i], protein: Math.max(0, (+S.nutrition[i].protein || 0) + g), _m: Date.now() };
-  else S.nutrition.push({ date: today(), protein: Math.max(0, g), _m: Date.now() });
+  else S.nutrition.push({ date: d, protein: Math.max(0, g), _m: Date.now() });
   save();
 }
-function setProtein(g) {
-  const i = S.nutrition.findIndex((n) => n.date === today());
-  const rec = { date: today(), protein: Math.max(0, g), _m: Date.now() };
+function setProtein(g, date) {
+  const d = date || today();
+  const i = S.nutrition.findIndex((n) => n.date === d);
+  const rec = { date: d, protein: Math.max(0, g), _m: Date.now() };
   if (i >= 0) S.nutrition[i] = rec; else S.nutrition.push(rec);
   save();
 }
@@ -1346,12 +1354,19 @@ function renderToday() {
   const bcs = bodyCompStalled();
   if (bcs) html += `<div class="banner warn"><div>${esc(bcs)}</div></div>`;
 
-  // protein quick-logger
-  const pt = proteinToday(), ptgt = S.profile.proteinTarget || 0;
+  // protein quick-logger — proteinLogDate lets a late-night shake after midnight get logged
+  // against YESTERDAY instead of today, which there was previously no way to do at all.
+  const plDate = proteinLogDate || today();
+  const isYesterday = plDate === yesterday();
+  const pt = proteinToday(plDate), ptgt = S.profile.proteinTarget || 0;
   const ppct = ptgt ? Math.min(100, Math.round((pt / ptgt) * 100)) : 0;
   html += `
-    <div class="blk-title"><span class="dot"></span>Protein today</div>
+    <div class="blk-title"><span class="dot"></span>Protein ${isYesterday ? "— yesterday" : "today"}</div>
     <div class="card">
+      <div class="seg" style="margin-bottom:10px">
+        <button data-plday="today" class="${!isYesterday ? "on" : ""}">Today</button>
+        <button data-plday="yesterday" class="${isYesterday ? "on" : ""}">Yesterday</button>
+      </div>
       <div class="row"><span class="bignum">${pt}<span class="unit"> / ${ptgt} g</span></span>
         <span class="pill ${pt >= ptgt && ptgt ? "good" : "acc"}">${ppct}%</span></div>
       <div class="pbar"><div class="pbar-fill" style="width:${ppct}%"></div></div>
@@ -1417,9 +1432,10 @@ function renderToday() {
   bindCueToggles();
   const regen = document.getElementById("regen-sess");
   if (regen) regen.onclick = () => { regenerateSession(); toast("New session generated"); renderToday(); };
-  document.querySelectorAll("[data-protein]").forEach((b) => b.onclick = () => { addProtein(+b.dataset.protein); renderToday(); });
+  document.querySelectorAll("[data-plday]").forEach((b) => b.onclick = () => { proteinLogDate = b.dataset.plday === "yesterday" ? yesterday() : null; renderToday(); });
+  document.querySelectorAll("[data-protein]").forEach((b) => b.onclick = () => { addProtein(+b.dataset.protein, proteinLogDate); renderToday(); });
   const pset = document.getElementById("p-set");
-  if (pset) pset.onchange = (e) => { const v = e.target.value.trim(); if (v !== "") { setProtein(Number(v)); renderToday(); } };
+  if (pset) pset.onchange = (e) => { const v = e.target.value.trim(); if (v !== "") { setProtein(Number(v), proteinLogDate); renderToday(); } };
   document.querySelectorAll("[data-walk]").forEach((b) => b.onclick = () => { addWalk(+b.dataset.walk); renderToday(); });
   const wset = document.getElementById("w-set");
   if (wset) wset.onchange = (e) => { const v = e.target.value.trim(); if (v !== "") { setWalk(Number(v)); renderToday(); } };
