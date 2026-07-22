@@ -1035,6 +1035,40 @@ function startHold(exId, setIdx) {
     renderRunner();
   };
 }
+/* work-interval countdown for cardio intervals (row_intervals: 30s hard). Counts DOWN, unlike
+   the count-up hold timer, since the work duration is fixed by the protocol, not something to
+   hold "as long as you can". Chains straight into the exercise's own rest duration (ex.restSec,
+   falling back to the profile default) on completion, so "30s hard / 60s easy" is something the
+   app actually runs for you, not just a line of cue text you have to self-time against. */
+let workInt = null, workEnd = 0;
+function stopWorkTimer() { if (workInt) clearInterval(workInt); workInt = null; const b = document.getElementById("work-bar"); if (b) b.remove(); }
+function startInterval(exId, setIdx) {
+  const ex = EXERCISES[exId];
+  stopWorkTimer(); stopHoldTimer(); stopRest();
+  const sec = ex.target.sec;
+  workEnd = Date.now() + sec * 1000;
+  const bar = document.createElement("div");
+  bar.id = "work-bar"; bar.className = "rest-bar work";
+  bar.innerHTML = `<span class="rest-lbl">HARD</span><span class="rest-t" id="work-t">${fmtClock(sec)}</span><button class="rest-x" id="work-skip">SKIP</button>`;
+  document.body.appendChild(bar);
+  const finish = () => {
+    stopWorkTimer();
+    restBeep(); if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    RUN.data[exId] = RUN.data[exId] || [];
+    RUN.data[exId][setIdx] = RUN.data[exId][setIdx] || { reps: null, load: null, dist: null, unit: null, rpe: null, done: false };
+    RUN.data[exId][setIdx].reps = sec;
+    saveRun();
+    startRest(ex.restSec || S.profile.restDefault || 90);
+    renderRunner();
+  };
+  const tick = () => {
+    const left = (workEnd - Date.now()) / 1000;
+    const t = document.getElementById("work-t"); if (t) t.textContent = fmtClock(left);
+    if (left <= 0) finish();
+  };
+  document.getElementById("work-skip").onclick = finish;
+  workInt = setInterval(tick, 250); tick();
+}
 function startRest(sec) {
   stopRest();
   restEnd = Date.now() + sec * 1000;
@@ -1455,9 +1489,16 @@ function renderRunner() {
       if (ex.muscle) tgt += i === pres.setsCount - 1 ? " · last set: push close to failure" : " · leave ~2 in reserve";
     }
     const cellHtml = timed ? `<button class="qbtn holdbtn" data-hold="${i}">⏱ time it</button>` : runnerLoadCell({ ...ex, load: effLoad }, i, cellVal);
+    // Interval-style cardio (setsCount > 1 — row_intervals, not row_steady's single continuous
+    // piece) gets an actual countdown + auto-chained rest instead of a plain editable number —
+    // "30s hard / 60s easy" should be something the app runs, not just cue text you self-time.
+    const cardioInterval = cardio && pres.setsCount > 1;
+    const col1Cell = cardioInterval
+      ? `<button class="qbtn holdbtn" data-interval="${i}">▶ Start ${fmtDur(ex.target.sec)}</button>`
+      : `<input data-set="${i}" data-f="reps" inputmode="numeric" placeholder="${cardio || timed ? "sec" : "reps"}" value="${esc(repsVal)}" />`;
     rows += `<div class="setrow">
       <button class="setdone ${ev && ev.done ? "on" : ""}" data-set="${i}" title="mark done + rest">${i + 1}</button>
-      <input data-set="${i}" data-f="reps" inputmode="numeric" placeholder="${cardio || timed ? "sec" : "reps"}" value="${esc(repsVal)}" />
+      ${col1Cell}
       ${cellHtml}
       ${showRpe ? `<select data-set="${i}" data-f="rpe"><option value="">RPE</option>${[6,7,8,9,10].map((n) => `<option ${rpeVal == n ? "selected" : ""}>${n}</option>`).join("")}</select>` : `<span></span>`}
     </div>
@@ -1500,6 +1541,7 @@ function renderRunner() {
   });
   document.querySelectorAll("[data-rest]").forEach((b) => b.onclick = () => startRest(+b.dataset.rest));
   document.querySelectorAll("[data-hold]").forEach((b) => b.onclick = () => startHold(exId, +b.dataset.hold));
+  document.querySelectorAll("[data-interval]").forEach((b) => b.onclick = () => startInterval(exId, +b.dataset.interval));
   const rdn = document.getElementById("rung-down"); if (rdn) rdn.onclick = () => { captureRun(exId); setRung(exId, assignedRung(exId) - 1); renderRunner(); };
   const rup = document.getElementById("rung-up"); if (rup) rup.onclick = () => { captureRun(exId); setRung(exId, assignedRung(exId) + 1); renderRunner(); };
   const prev = document.getElementById("run-prev"); if (prev) prev.onclick = () => { captureRun(exId); RUN.idx--; saveRun(); renderRunner(); };

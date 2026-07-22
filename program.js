@@ -271,10 +271,10 @@ const EXERCISES = {
     q: "rowing machine technique pace"
   },
   row_intervals: {
-    name: "Rower — Intervals", cat: "cond", load: "cardio", target: { sets: 6, sec: 30 },
+    name: "Rower — Intervals", cat: "cond", load: "cardio", target: { sets: 6, sec: 30 }, restSec: 60,
     equip: ["Rower"],
     setup: "Strap your feet in, grip the handle. Each set is 30s hard / 60s easy.",
-    cue: "30s hard / 60s easy. Log your STROKE COUNT for the 30s — that's what should improve round to round, not the duration, which is fixed.",
+    cue: "30s hard / 60s easy. Tap Start to run the 30s countdown — it chains straight into a 60s rest for you. Log your STROKE COUNT for the 30s once it's done — that's what should improve round to round, not the duration, which is fixed.",
     q: "rowing machine interval workout technique"
   },
 
