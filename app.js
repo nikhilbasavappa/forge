@@ -1498,6 +1498,12 @@ function renderRunner() {
       // and evidence points to proximity-to-failure mattering more than the exact rep count.
       if (ex.muscle) tgt += i === pres.setsCount - 1 ? " · last set: push close to failure" : " · leave ~2 in reserve";
     }
+    // ex.side only ever reached the summary pill at the top of the page ("3×8-12/side") — during
+    // actual set-by-set entry there was no indication a given row is per-side at all, leaving
+    // real ambiguity mid-session (is this row both sides, or do I redo all 3 rows on the other
+    // leg after?). Applied uniformly after tgt is finalized so it covers every branch above
+    // (timed holds, prehab/mobility, and normal reps/load) without duplicating the logic three times.
+    if (ex.side && !cardio) tgt += " · each side";
     const cellHtml = timed ? `<button class="qbtn holdbtn" data-hold="${i}">⏱ time it</button>` : runnerLoadCell({ ...ex, load: effLoad }, i, cellVal);
     // Interval-style cardio (setsCount > 1 — row_intervals, not row_steady's single continuous
     // piece) gets an actual countdown + auto-chained rest instead of a plain editable number —
