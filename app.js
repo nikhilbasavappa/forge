@@ -1610,14 +1610,26 @@ function captureRun(exId) {
   const pres = ex ? prescribe(exId) : null;
   const sets = [];
   document.querySelectorAll(".sets .setrow:not(.sethead)").forEach((row) => {
+    // The set INDEX has to come from something present on every row regardless of exercise
+    // type — .setdone always renders; [data-f="reps"] does not. An interval-cardio row
+    // (row_intervals/row_steady) has no reps INPUT at all — it's replaced by the "▶ Start"
+    // countdown button — so reading reps.dataset.set threw a TypeError (null has no .dataset)
+    // the moment Finish & Save's captureRun() hit one, which is nearly every session since
+    // Conditioning is normally the LAST block. That's a silent-looking failure: the onclick
+    // handler just throws and stops, so tapping the button visibly does nothing at all.
+    const doneBtn = row.querySelector(".setdone");
+    const i = +doneBtn.dataset.set;
     const reps = row.querySelector('[data-f="reps"]'), load = row.querySelector('[data-f="load"]'), dist = row.querySelector('[data-f="dist"]'), rpe = row.querySelector('[data-f="rpe"]');
-    const i = +reps.dataset.set;
-    const done = row.querySelector(".setdone")?.classList.contains("on") || false;
+    const done = doneBtn?.classList.contains("on") || false;
     // Clamp to non-negative and reject garbage (NaN from e.g. a pasted non-numeric value) --
     // a negative rep count isn't just wrong, it can silently corrupt PR tracking (any nonzero
     // number, negative included, is truthy and could win an empty "best so far" comparison).
     const cleanNum = (v) => { if (v == null || v === "") return null; const n = Math.max(0, Number(v)); return isFinite(n) ? n : null; };
-    let repsNum = cleanNum(reps.value);
+    // No reps input at all (interval-cardio row) — its duration was already written directly
+    // into RUN.data by startInterval() when the countdown completed; preserve it instead of
+    // wiping it to null just because there's nothing live in the DOM to re-read.
+    const existingReps = RUN.data[exId] && RUN.data[exId][i] ? RUN.data[exId][i].reps : null;
+    let repsNum = reps ? cleanNum(reps.value) : existingReps;
     // A "done"-marked set with no typed number logs the prescribed target — tapping done = "I did this set".
     if (repsNum == null && done && pres && pres.perSet[i] && pres.perSet[i].reps != null) repsNum = pres.perSet[i].reps;
     let loadVal = load && load.value != null && load.value.trim() !== "" ? load.value.trim() : null;
