@@ -333,9 +333,10 @@ function medianGap() {
 // session's 45 seconds-held as if it were "45 reps you did last time" on the new movement,
 // which corrupts momentum/isStalled/the beat-last-time target and the 20-rep volume floor all
 // at once (a 45 "rep" baseline blows past any real rep target instantly).
-function exHistory(exId, variation) {
+function exHistory(exId, variation, beforeDate) {
   const out = [];
   S.workouts.forEach((w) => {
+    if (beforeDate && w.date >= beforeDate) return;
     const e = w.entries.find((x) => x.exId === exId && (!variation || x.variation === variation)); if (!e) return;
     const sets = e.sets.filter((s) => s.reps != null); if (!sets.length) return;
     const top = Math.max(...sets.map((s) => +s.reps || 0));
@@ -351,9 +352,9 @@ function exHistory(exId, variation) {
   });
   return out;
 }
-function momentum(exId, ex) {
+function momentum(exId, ex, beforeDate) {
   if (ex.load === "time" || ex.load === "cardio") return false;
-  const h = exHistory(exId, ex.ladder ? assignedVariation(exId) : undefined); if (h.length < 2) return false;
+  const h = exHistory(exId, ex.ladder ? assignedVariation(exId) : undefined, beforeDate); if (h.length < 2) return false;
   return h.slice(-2).every((s) => s.top >= ex.target.hi && (!s.rpe || s.rpe <= 8));
 }
 // Stalled = no rep PR AND no load increase across 3 sessions — weight-aware so a session
@@ -705,10 +706,13 @@ function prescribe(exId) {
       note: "Controlled reps through a full, comfortable range — quality over quantity",
     };
   }
-  const last = lastEntry(exId, ex.ladder ? assignedVariation(exId) : undefined);
+  // Backdating (RUN.date set) reconstructs a past session — history from ON OR AFTER that date
+  // hasn't "happened yet" from its perspective, so it must not leak into what counts as "last."
+  const beforeDate = (typeof RUN !== "undefined" && RUN && RUN.date) || undefined;
+  const last = lastEntry(exId, ex.ladder ? assignedVariation(exId) : undefined, beforeDate);
   const deload = deloadActive();
   const rd = readiness();
-  const mo = momentum(exId, ex);
+  const mo = momentum(exId, ex, beforeDate);
   // A ladder rung can be timed (chinup_prog/pullup_prog's "Dead hang (time)" starting rung)
   // even though the exercise's own load type is "reps" for its later rungs — ex.load alone
   // doesn't know that. Without this check, the reps-shaped machinery below ran on the raw
@@ -823,13 +827,19 @@ function insertActivitySorted(a) {
 }
 // Looks across real sessions AND off-day prehab/mobility — an exercise done on a rest day
 // still sets the bar for "last time" and still feeds progression next time it's prescribed.
-function lastEntry(exId, variation) {
+// beforeDate, when passed, ignores any entry on or after it — used when backdating, so
+// prescribing/progressing a session for an EARLIER date doesn't leak in data from sessions that,
+// from that day's perspective, haven't happened yet (e.g. "beat 15 reps" while backfilling
+// Monday, sourced from a session actually logged Wednesday).
+function lastEntry(exId, variation, beforeDate) {
   let best = null;
   for (let i = S.workouts.length - 1; i >= 0; i--) {
+    if (beforeDate && S.workouts[i].date >= beforeDate) continue;
     const e = S.workouts[i].entries.find((x) => x.exId === exId && (!variation || x.variation === variation));
     if (e) { best = { date: S.workouts[i].date, m: S.workouts[i]._m || 0, entry: e }; break; }
   }
   for (let i = (S.activity || []).length - 1; i >= 0; i--) {
+    if (beforeDate && S.activity[i].date >= beforeDate) continue;
     const e = S.activity[i].entries.find((x) => x.exId === exId && (!variation || x.variation === variation));
     if (e) {
       const cand = { date: S.activity[i].date, m: S.activity[i]._m || 0, entry: e };
