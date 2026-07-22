@@ -2388,6 +2388,32 @@ function renderBackdatePicker(date) {
     startRun(sess, date);
   };
 }
+// Diagnostic view of daysSinceMuscle()'s actual reasoning — a "never trained" claim contradicting
+// real logged history is a data-visibility problem (wrong device, entries referencing a removed/
+// renamed exId, a sync gap), not something guessable from outside the account. This surfaces
+// exactly what the app currently sees so it can be screenshotted back instead of guessed at again.
+function muscleFreshnessDebugHTML() {
+  const rows = Object.keys(MUSCLE_TARGETS).map((m) => {
+    let best = null;
+    const scan = (arr) => (arr || []).forEach((w) => (w.entries || []).forEach((e) => {
+      const ex = EXERCISES[e.exId];
+      if (ex && ex.muscle === m) {
+        const d = daysAgo(w.date);
+        if (!best || d < best.days) best = { days: d, date: w.date, exId: e.exId, name: ex.name };
+      }
+    }));
+    scan(S.workouts); scan(S.activity);
+    return { m, label: MUSCLE_DISPLAY[m], best };
+  });
+  const recentWorkouts = S.workouts.slice(-8).reverse()
+    .map((w) => `${w.date} — ${w.sessionKey || "?"} (${(w.entries || []).map((e) => e.exId).join(", ")})`);
+  return `
+    ${rows.map((r) => `<div class="row small" style="padding:4px 0"><span>${esc(r.label)}</span><span class="muted">${r.best ? `${r.best.days}d — ${esc(r.best.name)} (${esc(r.best.date)})` : "no matching entry found"}</span></div>`).join("")}
+    <div class="tiny muted" style="margin-top:10px">Total workouts logged: ${S.workouts.length} · activity entries: ${(S.activity || []).length}</div>
+    <div class="tiny muted" style="margin-top:6px">Last 8 workouts (newest first):</div>
+    ${recentWorkouts.length ? recentWorkouts.map((w) => `<div class="tiny muted">${esc(w)}</div>`).join("") : `<div class="tiny muted">none</div>`}
+  `;
+}
 function renderMore() {
   TITLE.textContent = "More";
   SUB.textContent = "Review · sync · export";
@@ -2403,6 +2429,11 @@ function renderMore() {
       <button class="btn" id="sync-connect" style="margin-top:12px">${SY.key ? "Sync now" : "Connect & sync"}</button>
       ${SY.key ? `<button class="btn ghost" id="sync-off" style="margin-top:8px">Disconnect this device</button>` : ""}
       <div class="tiny muted" style="margin-top:10px">Use the same passphrase on each device to share data. Anyone with it can read your log, so make it long. Data syncs on open, on change, and when you return to the app.</div>
+    </div>
+    <div class="blk-title"><span class="dot"></span>Debug: muscle freshness</div>
+    <div class="card">
+      <div class="tiny muted" style="margin-bottom:8px">What the app currently sees for each muscle — the most recent matching logged exercise, and how many days ago. If a muscle looks wrong here (e.g. says "no matching entry found" despite real history), screenshot this section.</div>
+      ${muscleFreshnessDebugHTML()}
     </div>
     <div class="blk-title"><span class="dot"></span>Log a past session</div>
     <div class="card">
