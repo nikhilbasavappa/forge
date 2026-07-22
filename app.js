@@ -2254,6 +2254,48 @@ function buildExport() {
   return md;
 }
 
+// Transient selection state for the backdate exercise picker — not part of S, reset each visit.
+let BD_PICK = new Set();
+function renderBackdatePicker(date) {
+  BD_PICK = new Set();
+  TITLE.textContent = "Log a past session";
+  SUB.textContent = prettyDate(date);
+  const groups = [];
+  for (const [m, label] of Object.entries(MUSCLE_DISPLAY)) {
+    const ids = Object.keys(EXERCISES).filter((id) => EXERCISES[id].muscle === m);
+    if (ids.length) groups.push({ label, ids });
+  }
+  const coreIds = Object.keys(EXERCISES).filter((id) => EXERCISES[id].cat === "core");
+  if (coreIds.length) groups.push({ label: "Core", ids: coreIds });
+  const condIds = Object.keys(EXERCISES).filter((id) => EXERCISES[id].cat === "cond");
+  if (condIds.length) groups.push({ label: "Conditioning", ids: condIds });
+
+  VIEW.innerHTML = `
+    <button class="btn ghost sm" id="bd-back" style="margin:8px 0 6px">← Back</button>
+    <div class="small muted" style="margin-bottom:8px">Tap everything you actually did on ${esc(prettyDate(date))} — this records reality, not a fresh guess. Sets/reps get entered the normal way, right after.</div>
+    ${groups.map((g) => `
+      <div class="blk-title"><span class="dot"></span>${esc(g.label)}</div>
+      <div class="card">
+        <div class="seg" style="flex-wrap:wrap">
+          ${g.ids.map((id) => `<button class="flagbtn" data-bdex="${id}">${esc(EXERCISES[id].name)}</button>`).join("")}
+        </div>
+      </div>`).join("")}
+    <button class="btn good" id="bd-log" style="margin:14px 0 24px;width:100%">Log 0 exercises for ${esc(prettyDate(date))}</button>
+  `;
+  document.getElementById("bd-back").onclick = () => renderMore();
+  const logBtn = document.getElementById("bd-log");
+  document.querySelectorAll("[data-bdex]").forEach((b) => b.onclick = () => {
+    const id = b.dataset.bdex;
+    if (BD_PICK.has(id)) BD_PICK.delete(id); else BD_PICK.add(id);
+    b.classList.toggle("on", BD_PICK.has(id));
+    logBtn.textContent = `Log ${BD_PICK.size} exercise${BD_PICK.size === 1 ? "" : "s"} for ${prettyDate(date)}`;
+  });
+  logBtn.onclick = () => {
+    if (!BD_PICK.size) { toast("Pick at least one exercise"); return; }
+    const sess = { title: "Backdated session", blocks: [{ title: "Exercises", ex: Array.from(BD_PICK) }] };
+    startRun(sess, date);
+  };
+}
 function renderMore() {
   TITLE.textContent = "More";
   SUB.textContent = "Review · sync · export";
@@ -2272,10 +2314,10 @@ function renderMore() {
     </div>
     <div class="blk-title"><span class="dot"></span>Log a past session</div>
     <div class="card">
-      <div class="small muted">Trained but it never saved, or forgot to log same-day? Pick the date — it generates a session and opens the normal guided runner backdated to that day.</div>
+      <div class="small muted">Trained but it never saved, or forgot to log same-day? Pick the date, then pick exactly which exercises you did — this records what actually happened, not a fresh algorithmic guess.</div>
       <label class="fld" style="margin-top:12px"><span class="lt">Date</span>
         <input id="bd-date" type="date" max="${esc(today())}" value="${esc(yesterday())}"/></label>
-      <button class="btn ghost" id="bd-go" style="margin-top:10px">Generate & log</button>
+      <button class="btn ghost" id="bd-go" style="margin-top:10px">Pick exercises →</button>
     </div>
     <div class="blk-title"><span class="dot"></span>Weekly review export</div>
     <div class="card">
@@ -2324,7 +2366,7 @@ function renderMore() {
     const d = document.getElementById("bd-date").value;
     if (!d) { toast("Pick a date first"); return; }
     if (d > today()) { toast("Can't backdate to the future"); return; }
-    startRun(generateSession(), d);
+    renderBackdatePicker(d);
   };
   document.getElementById("exp-copy").onclick = async () => {
     const md = buildExport();
