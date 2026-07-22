@@ -304,7 +304,7 @@ function isBodyweightMode() { return typeof BW_SWAPS !== "undefined" && S.swaps 
 // crossover or pallof's side anchor. The regex alone can't tell "this band move happens to
 // share a verb with a real dumbbell exercise" from "this band move IS a real dumbbell
 // exercise," so exercises that fail that distinction opt out explicitly.
-function dumbbellMode(ex) { return S.equipment && S.equipment.dumbbells && ex.load === "band" && !ex.noDumbbellMode && /curl|press|fly|row|squat|rdl|pressdown/i.test(ex.name + " " + (ex.cat || "")); }
+function dumbbellMode(ex) { return S.equipment && S.equipment.dumbbells && ex.load === "band" && !ex.noDumbbellMode && /curl|press|fly|row|squat|rdl|pressdown|raise/i.test(ex.name + " " + (ex.cat || "")); }
 // Numeric-load exercises are the ones the weight-progression engine can auto-step:
 // dumbbell-mode band moves once dumbbells are on, plus anything already tracked in lb (backpack curl).
 function isNumericLoad(ex) { return dumbbellMode(ex) || ex.load === "weight"; }
