@@ -1561,8 +1561,13 @@ function renderRunner() {
     // continuous 5:00 piece, chains the generic post-set rest same as finishing any other set)
     // should be something the app times for you, not just cue text you self-time against a
     // watch. Only skips the countdown for a value already typed/carried forward from history.
+    // ex.restSec (row_intervals only, not row_steady's single continuous piece) means this
+    // exercise has a real hard/easy protocol, not just a duration to start and stop — say so
+    // on the button itself. Previously it just read "Start 30s" on every row with no mention
+    // of the 60s that follows, so the interval structure was invisible until you'd already used
+    // it once and discovered the rest chained in on its own.
     const col1Cell = cardio
-      ? `<button class="qbtn holdbtn" data-interval="${i}">▶ Start ${fmtDur(ex.target.sec)}</button>`
+      ? `<button class="qbtn holdbtn" data-interval="${i}">▶ ${ex.restSec ? `${fmtDur(ex.target.sec)} hard → ${fmtDur(ex.restSec)} easy` : `Start ${fmtDur(ex.target.sec)}`}</button>`
       : `<input data-set="${i}" data-f="reps" inputmode="numeric" placeholder="${cardio || timed ? "sec" : "reps"}" value="${esc(repsVal)}" />`;
     rows += `<div class="setrow">
       <button class="setdone ${ev && ev.done ? "on" : ""}" data-set="${i}" title="mark done + rest">${i + 1}</button>
