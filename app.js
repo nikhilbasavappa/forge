@@ -2451,6 +2451,27 @@ function muscleFreshnessDebugHTML() {
     ${recentWorkouts.length ? recentWorkouts.map((w) => `<div class="tiny muted">${esc(w)}</div>`).join("") : `<div class="tiny muted">none</div>`}
   `;
 }
+// Same idea as muscleFreshnessDebugHTML but for ladder state specifically — shows the CURRENT
+// assigned rung/variation next to the variation tag actually stored on the last few logged
+// entries, so a "beat my hang time as reps" report can be checked directly instead of guessed
+// at from a synthetic reproduction that might not match what really happened on the account.
+function ladderDebugHTML() {
+  const laddered = Object.entries(EXERCISES).filter(([, ex]) => ex.ladder);
+  const rows = laddered.map(([id, ex]) => {
+    const rung = assignedRung(id);
+    const curVar = ex.ladder[rung];
+    const recent = [];
+    S.workouts.forEach((w) => { const e = w.entries.find((x) => x.exId === id); if (e) recent.push({ date: w.date, variation: e.variation || "(untagged)", reps: e.sets.map((s) => s.reps).join(",") }); });
+    (S.activity || []).forEach((a) => { const e = a.entries.find((x) => x.exId === id); if (e) recent.push({ date: a.date, variation: e.variation || "(untagged)", reps: e.sets.map((s) => s.reps).join(",") }); });
+    recent.sort((a, b) => (a.date < b.date ? 1 : -1));
+    return { id, name: ex.name, rung, curVar, recent: recent.slice(0, 3) };
+  });
+  return rows.map((r) => `
+    <div style="margin-bottom:10px">
+      <div class="small" style="font-weight:600">${esc(r.name)} — assigned: rung ${r.rung + 1} "${esc(r.curVar)}"</div>
+      ${r.recent.length ? r.recent.map((e) => `<div class="tiny muted">${esc(e.date)} · tagged "${esc(e.variation)}" · logged [${esc(e.reps)}]</div>`).join("") : `<div class="tiny muted">no history logged</div>`}
+    </div>`).join("");
+}
 function renderMore() {
   TITLE.textContent = "More";
   SUB.textContent = "Review · sync · export";
@@ -2471,6 +2492,11 @@ function renderMore() {
     <div class="card">
       <div class="tiny muted" style="margin-bottom:8px">What the app currently sees for each muscle — the most recent matching logged exercise, and how many days ago. If a muscle looks wrong here (e.g. says "no matching entry found" despite real history), screenshot this section.</div>
       ${muscleFreshnessDebugHTML()}
+    </div>
+    <div class="blk-title"><span class="dot"></span>Debug: ladder state</div>
+    <div class="card">
+      <div class="tiny muted" style="margin-bottom:8px">For every progression ladder (pull-ups, chin-ups, push-ups, etc.) — the rung it's currently assigned, and what variation tag + raw values are actually stored on the last 3 logged sessions. If a target looks wrong (e.g. mixing hold-seconds into a rep count), screenshot this section.</div>
+      ${ladderDebugHTML()}
     </div>
     <div class="blk-title"><span class="dot"></span>Log a past session</div>
     <div class="card">
