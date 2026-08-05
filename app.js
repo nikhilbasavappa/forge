@@ -1448,14 +1448,17 @@ const RUN_KEY = "forge.run";
 let RUN = (() => { try { return JSON.parse(localStorage.getItem(RUN_KEY)) || null; } catch { return null; } })();
 function saveRun() { if (RUN) localStorage.setItem(RUN_KEY, JSON.stringify(RUN)); else localStorage.removeItem(RUN_KEY); }
 
-function startRun(sess, dateStr) {
+function startRun(sess, dateStr, activityInfo) {
   const rawList = blocksFlat(sess);
   const list = rawList.map(resolveEx);
   // The first real external-load exercise of the session gets a one-line warm-up reminder
   // (see renderRunner) — not a tracked/logged set, just a nudge, so it doesn't need its own
   // data model or touch progression math. Only relevant once real weight is involved.
   const warmupFor = list.find((id) => isNumericLoad(EXERCISES[id], id)) || null;
-  RUN = { title: sess.title, rawList, list, idx: 0, startTs: Date.now(), data: {}, date: dateStr || null, warmupFor };
+  // activityInfo ({isPrehab, activityType}) lets a backdated prehab/mobility-only selection
+  // save through the same off-day activity path a live "Daily prehab"/"Mobility & stretch"
+  // session uses, instead of always landing in S.workouts as a strength session.
+  RUN = { title: sess.title, rawList, list, idx: 0, startTs: Date.now(), data: {}, date: dateStr || null, warmupFor, ...(activityInfo || {}) };
   saveRun(); renderRunner();
 }
 function startPrehab() {
@@ -2403,6 +2406,13 @@ function renderBackdatePicker(date) {
   if (coreIds.length) groups.push({ label: "Core", ids: coreIds });
   const condIds = Object.keys(EXERCISES).filter((id) => EXERCISES[id].cat === "cond");
   if (condIds.length) groups.push({ label: "Conditioning", ids: condIds });
+  // Off-day work (prehab drills, mobility/stretching) was previously impossible to backdate at
+  // all — the picker only covered strength-shaped exercises, so a real day of prehab or
+  // mobility work had nowhere to go and just vanished from history entirely.
+  const prehabIds = Object.keys(EXERCISES).filter((id) => EXERCISES[id].cat === "prehab");
+  if (prehabIds.length) groups.push({ label: "Prehab", ids: prehabIds });
+  const mobilityIds = Object.keys(EXERCISES).filter((id) => EXERCISES[id].cat === "mobility");
+  if (mobilityIds.length) groups.push({ label: "Mobility / stretch", ids: mobilityIds });
 
   VIEW.innerHTML = `
     <button class="btn ghost sm" id="bd-back" style="margin:8px 0 6px">← Back</button>
@@ -2426,8 +2436,18 @@ function renderBackdatePicker(date) {
   });
   logBtn.onclick = () => {
     if (!BD_PICK.size) { toast("Pick at least one exercise"); return; }
-    const sess = { title: "Backdated session", blocks: [{ title: "Exercises", ex: Array.from(BD_PICK) }] };
-    startRun(sess, date);
+    const picked = Array.from(BD_PICK);
+    const cats = new Set(picked.map((id) => EXERCISES[id].cat));
+    // A selection made ENTIRELY of prehab (or entirely mobility) exercises logs as off-day
+    // activity, the same shape a live "Daily prehab"/"Mobility & stretch" session produces —
+    // anything else (strength, core, conditioning, or a mix of those with off-day work) logs
+    // as a normal workout, same as before.
+    let activityInfo = null;
+    if (cats.size === 1 && cats.has("prehab")) activityInfo = { isPrehab: true, activityType: "prehab" };
+    else if (cats.size === 1 && cats.has("mobility")) activityInfo = { isPrehab: true, activityType: "mobility" };
+    const title = activityInfo ? `${activityInfo.activityType === "prehab" ? "Prehab" : "Mobility"} (backdated)` : "Backdated session";
+    const sess = { title, blocks: [{ title: "Exercises", ex: picked }] };
+    startRun(sess, date, activityInfo);
   };
 }
 // Diagnostic view of daysSinceMuscle()'s actual reasoning — a "never trained" claim contradicting
@@ -2635,5 +2655,13 @@ if (SY.key) syncNow({ rerender: true });
 window.addEventListener("online", () => syncNow({ rerender: true }));
 document.addEventListener("visibilitychange", () => { if (!document.hidden) syncNow({ rerender: true }); });
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  // Registering alone leans on the browser's own background check for a new sw.js, which isn't
+  // guaranteed to happen the moment a new version ships. An explicit update() on load and on
+  // returning to the tab forces an immediate check instead of waiting on that timing — paired
+  // with install now doing real (non-cached) fetches, a genuinely new version should reliably
+  // reach an open tab without needing a manual reinstall.
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").then((reg) => reg.update()).catch(() => {}));
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) navigator.serviceWorker.getRegistration().then((reg) => reg && reg.update()).catch(() => {});
+  });
 }

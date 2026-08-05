@@ -1,5 +1,5 @@
 /* sw.js — offline app shell + buddy push. Bump CACHE when files change to force update. */
-const CACHE = "forge-v81";
+const CACHE = "forge-v82";
 const SYNC_BASE = "https://forge-sync.nikvbas.workers.dev";
 const ASSETS = [
   "./", "./index.html", "./styles.css", "./program.js", "./app.js",
@@ -7,7 +7,18 @@ const ASSETS = [
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // c.addAll() used default fetch caching, which can pull a STALE copy of an asset straight
+  // from the browser's own HTTP cache even while installing a brand-new CACHE version — the SW
+  // version bump is real and detected correctly, but the content it bakes in on install could
+  // still be old. This is very likely the actual mechanism behind most of today's "I bumped the
+  // version and it's still showing the old thing" reports. {cache:"reload"} forces every asset
+  // fetch during install to bypass HTTP cache and hit the network for real, so a new CACHE
+  // version now genuinely guarantees fresh content, not just a fresh cache key.
+  e.waitUntil(
+    caches.open(CACHE)
+      .then((c) => Promise.all(ASSETS.map((url) => fetch(url, { cache: "reload" }).then((res) => c.put(url, res)))))
+      .then(() => self.skipWaiting())
+  );
 });
 self.addEventListener("activate", (e) => {
   e.waitUntil(
