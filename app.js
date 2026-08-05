@@ -966,24 +966,30 @@ function setProtein(g, date) {
 }
 
 /* ---------- walking (NEAT) ---------- */
-function walkToday() { const w = S.walks.find((x) => x.date === today()); return w ? (+w.min || 0) : 0; }
-function inclineToday() { const w = S.walks.find((x) => x.date === today()); return w && w.incline != null ? +w.incline : null; }
-function addWalk(m) {
-  const i = S.walks.findIndex((x) => x.date === today());
+// Same fix as protein — this is the treadmill-time tracker (minutes + incline), and it was just
+// as hardcoded to today() with no way to log a past day's walk/treadmill session at all.
+let walkLogDate = null;
+function walkToday(date) { const w = S.walks.find((x) => x.date === (date || today())); return w ? (+w.min || 0) : 0; }
+function inclineToday(date) { const w = S.walks.find((x) => x.date === (date || today())); return w && w.incline != null ? +w.incline : null; }
+function addWalk(m, date) {
+  const d = date || today();
+  const i = S.walks.findIndex((x) => x.date === d);
   if (i >= 0) S.walks[i] = { ...S.walks[i], min: Math.max(0, (+S.walks[i].min || 0) + m), _m: Date.now() };
-  else S.walks.push({ date: today(), min: Math.max(0, m), _m: Date.now() });
+  else S.walks.push({ date: d, min: Math.max(0, m), _m: Date.now() });
   save();
 }
-function setWalk(m) {
-  const i = S.walks.findIndex((x) => x.date === today());
+function setWalk(m, date) {
+  const d = date || today();
+  const i = S.walks.findIndex((x) => x.date === d);
   if (i >= 0) S.walks[i] = { ...S.walks[i], min: Math.max(0, m), _m: Date.now() };
-  else S.walks.push({ date: today(), min: Math.max(0, m), _m: Date.now() });
+  else S.walks.push({ date: d, min: Math.max(0, m), _m: Date.now() });
   save();
 }
-function setIncline(v) {
-  const i = S.walks.findIndex((x) => x.date === today());
+function setIncline(v, date) {
+  const d = date || today();
+  const i = S.walks.findIndex((x) => x.date === d);
   if (i >= 0) S.walks[i] = { ...S.walks[i], incline: Math.max(0, v), _m: Date.now() };
-  else S.walks.push({ date: today(), min: 0, incline: Math.max(0, v), _m: Date.now() });
+  else S.walks.push({ date: d, min: 0, incline: Math.max(0, v), _m: Date.now() });
   save();
 }
 
@@ -1394,13 +1400,19 @@ function renderToday() {
     html += `</div>`;
   }
 
-  // walk / NEAT logger — after the session, since that's usually when it happens
-  const wkMin = walkToday(), wkTgt = S.profile.walkTarget || 0;
+  // walk / NEAT logger (treadmill time) — after the session, since that's usually when it happens
+  const wlDate = walkLogDate || today();
+  const wlIsYesterday = wlDate === yesterday();
+  const wkMin = walkToday(wlDate), wkTgt = S.profile.walkTarget || 0;
   const wkPct = wkTgt ? Math.min(100, Math.round((wkMin / wkTgt) * 100)) : 0;
-  const wkIncline = inclineToday();
+  const wkIncline = inclineToday(wlDate);
   html += `
-    <div class="blk-title"><span class="dot"></span>Walk today</div>
+    <div class="blk-title"><span class="dot"></span>Walk ${wlIsYesterday ? "— yesterday" : "today"}</div>
     <div class="card">
+      <div class="seg" style="margin-bottom:10px">
+        <button data-wlday="today" class="${!wlIsYesterday ? "on" : ""}">Today</button>
+        <button data-wlday="yesterday" class="${wlIsYesterday ? "on" : ""}">Yesterday</button>
+      </div>
       <div class="row"><span class="bignum">${wkMin}<span class="unit"> / ${wkTgt} min</span></span>
         <span class="pill ${wkMin >= wkTgt && wkTgt ? "good" : "acc"}">${wkPct}%</span></div>
       <div class="tiny muted" style="margin-top:4px">Anytime today — often easiest right after training.</div>
@@ -1436,11 +1448,12 @@ function renderToday() {
   document.querySelectorAll("[data-protein]").forEach((b) => b.onclick = () => { addProtein(+b.dataset.protein, proteinLogDate); renderToday(); });
   const pset = document.getElementById("p-set");
   if (pset) pset.onchange = (e) => { const v = e.target.value.trim(); if (v !== "") { setProtein(Number(v), proteinLogDate); renderToday(); } };
-  document.querySelectorAll("[data-walk]").forEach((b) => b.onclick = () => { addWalk(+b.dataset.walk); renderToday(); });
+  document.querySelectorAll("[data-wlday]").forEach((b) => b.onclick = () => { walkLogDate = b.dataset.wlday === "yesterday" ? yesterday() : null; renderToday(); });
+  document.querySelectorAll("[data-walk]").forEach((b) => b.onclick = () => { addWalk(+b.dataset.walk, walkLogDate); renderToday(); });
   const wset = document.getElementById("w-set");
-  if (wset) wset.onchange = (e) => { const v = e.target.value.trim(); if (v !== "") { setWalk(Number(v)); renderToday(); } };
+  if (wset) wset.onchange = (e) => { const v = e.target.value.trim(); if (v !== "") { setWalk(Number(v), walkLogDate); renderToday(); } };
   const wInc = document.getElementById("w-incline");
-  if (wInc) wInc.onchange = (e) => { const v = e.target.value; if (v !== "") { setIncline(Number(v)); renderToday(); } };
+  if (wInc) wInc.onchange = (e) => { const v = e.target.value; if (v !== "") { setIncline(Number(v), walkLogDate); renderToday(); } };
 }
 
 /* ---------- GUIDED WORKOUT RUNNER ---------- */
