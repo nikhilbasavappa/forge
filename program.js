@@ -76,6 +76,25 @@ const EXERCISES = {
     equip: ["Pull-up bar"],
     setup: "Hang from the pull-up bar with an overhand grip (palms away), hands shoulder-width.",
     ladder: ["Dead hang (time)", "Scapular pull (shrug at bottom)", "Negative (slow lower)", "Band-assisted pull-up", "Full pull-up", "Weighted pull-up"],
+    // Each rung below is a genuinely different movement, not the same pull-up at increasing
+    // difficulty — the exercise-level cue/setup ("lead the chest to the bar") only actually
+    // applies to the last two rungs. rungCue()/rungSetup() in app.js prefer these when present.
+    ladderSetup: [
+      "Hang from the bar with an overhand grip, arms fully extended, feet off the floor.",
+      "Hang from the bar with an overhand grip, arms straight.",
+      "Jump or step up so your chin is already over the bar, overhand grip.",
+      "Loop a resistance band over the bar and under one knee or foot for assistance, then hang overhand.",
+      "Hang from the bar with an overhand grip (palms away), hands shoulder-width, arms fully extended.",
+      "Add weight with a dip belt, weighted vest, or a loaded backpack, then hang from the bar overhand.",
+    ],
+    ladderCue: [
+      "Just hang — relax into it, brace the core so you don't swing. Timed hold, not reps: build hang time and shoulder stability before adding any pulling.",
+      "Without bending the elbows, pull the shoulder blades down and together, then relax back to a dead hang. Small movement, no elbow bend — this is the shoulder-blade set you'll need before the elbows ever bend.",
+      "Start at the top (chin over the bar) and lower yourself as slowly as you can, 3–5+ seconds down. The lowering strength is what lets you pull yourself up in the first place.",
+      "Pull through a full range with the band taking some of your weight. Use the lightest band that still lets you complete the set — less help each time you retest.",
+      "Depress the shoulder blades before the arms move. Pull your chin over the bar, control the descent. Stop 1–2 reps short of failure.",
+      "Same full pull-up technique, now loaded. Depress the shoulder blades before the arms move, chin over the bar, control the descent. Add weight in small jumps once you clear the top of your rep range.",
+    ],
     cue: "Depress the shoulder blades before the arms. Control the descent. Stop 1–2 reps short of failure.",
     q: "pull up progression beginner"
   },
@@ -113,6 +132,27 @@ const EXERCISES = {
     equip: ["Floor"],
     setup: "Hands under the shoulders in a plank. Hands up on a counter/wall makes it easier; feet up on a chair/bed makes it harder.",
     ladder: ["Hands elevated (high)", "Hands elevated (low)", "Knee push-up", "Full push-up", "Feet elevated (upper chest)", "Weighted / band"],
+    // "Body straight" (the exercise-level cue) is flat wrong for the knee push-up rung — the
+    // whole point there is the knees are down and the torso-to-knee line is what stays straight,
+    // not torso-to-feet. The base cue's "once strong, elevate the feet" line is also forward-
+    // looking advice that's only relevant BEFORE you reach the feet-elevated rung — stale once
+    // you're already there or past it. Writing all 6 out avoids both problems.
+    ladderSetup: [
+      "Hands on a high surface — a countertop or sturdy table — feet on the floor, body in a straight line.",
+      "Hands on a lower surface — a chair seat, coffee table, or low step — feet on the floor, body in a straight line.",
+      "Plank on your knees instead of your toes, hands under the shoulders.",
+      "Hands under the shoulders in a plank, feet together or hip-width, body in a straight line from head to heels.",
+      "Feet up on a chair or the edge of a bed, hands on the floor under the shoulders, body in a straight line.",
+      "Add a weight plate or loaded backpack on your back, or loop a band across your shoulders and under your hands, then set up in a full plank.",
+    ],
+    ladderCue: [
+      "Hands under the shoulders on the elevated surface, elbows ~45°, body straight from head to heels, lower under control. The higher your hands, the easier — pick a height that leaves 1–2 reps in reserve.",
+      "Same as the last rung, just lower — closer to the floor increases the load. Elbows ~45°, body straight, lower under control.",
+      "Knees down, hands under shoulders, straight line from knees to head — don't let the hips sag or pike. Lower the chest toward the floor, elbows ~45°.",
+      "Hands under shoulders, elbows ~45°, body straight, lower under control. Once this is easy for all sets, the next rung elevates the FEET to shift work toward the upper chest — your lagging area.",
+      "Same push-up technique, feet elevated — shifts the work toward the upper chest, your lagging area. Elbows ~45°, body straight, lower under control.",
+      "Same full push-up technique (feet elevated too, if you're ready for it), now loaded. Elbows ~45°, body straight, lower under control. Add load in small increments once you clear the top of your rep range.",
+    ],
     cue: "Hands under shoulders, elbows ~45°, body straight, lower under control. Higher hands = easier. Once strong, elevate the FEET (chair/bed) — that shifts the work to the upper chest, your lagging area.",
     q: "decline push up upper chest"
   },
@@ -193,6 +233,26 @@ const EXERCISES = {
     equip: ["Floor"],
     setup: "Stand feet shoulder-width, toes slightly out. Hold a weight/loaded backpack at your chest if you have one, otherwise bodyweight.",
     ladder: ["Box squat", "Bodyweight squat", "Tempo bodyweight", "Goblet (band/weight)"],
+    // Box squat needs a literal object to sit onto (never stated); tempo squat's protocol was
+    // never explained at all. ladderEquip covers the box; ladderSetup/ladderCue cover the rest.
+    ladderEquip: [
+      ["Floor", "Sturdy chair or step"],
+      null,
+      null,
+      ["Floor", "Weight or loaded backpack"],
+    ],
+    ladderSetup: [
+      "Stand in front of a sturdy chair or step, feet shoulder-width, toes slightly out.",
+      "Stand feet shoulder-width, toes slightly out, bodyweight only — no added load yet.",
+      "Stand feet shoulder-width, toes slightly out, bodyweight only.",
+      "Stand feet shoulder-width, toes slightly out, holding a weight or loaded backpack at your chest.",
+    ],
+    ladderCue: [
+      "Sit back and down onto the chair, tap it lightly with your hips, then stand back up — don't relax your weight fully onto it. Builds depth and control before free-standing squats.",
+      "Chest up, knees track over toes, hips between the heels. Drive through the full foot. Once this feels easy, the next rung adds slow tempo before you add any weight.",
+      "Same bodyweight squat, but slow it down: 3 seconds lowering, 1 second pause at the bottom, then stand. The extra time under tension is what makes bodyweight alone still count as progress.",
+      "Hold the load at your chest, elbows in. Chest up, knees track over toes, hips between the heels, drive through the full foot.",
+    ],
     cue: "Chest up, knees track over toes, hips between the heels. Drive through the full foot.",
     q: "goblet squat exercise"
   },
@@ -258,6 +318,27 @@ const EXERCISES = {
     equip: ["Pull-up bar"],
     setup: "Hang from the bar with an overhand grip, legs straight and still.",
     ladder: ["Lying leg raise", "Hanging knee tuck", "Hanging knee raise", "Hanging leg raise"],
+    // Rung 1 ("Lying leg raise") is a FLOOR exercise — it doesn't use the bar at all, despite
+    // the exercise-level setup/cue and equip[] both being written for the hanging rungs. That's
+    // a direct contradiction, not just a missing detail — hence ladderEquip too, not just text.
+    ladderEquip: [
+      ["Floor"],
+      null,
+      null,
+      null,
+    ],
+    ladderSetup: [
+      "Lie flat on your back on the floor, legs straight, hands at your sides or under your lower back.",
+      "Hang from the bar with an overhand grip, legs relaxed.",
+      "Hang from the bar with an overhand grip, legs straight and still.",
+      "Hang from the bar with an overhand grip, legs straight and together.",
+    ],
+    ladderCue: [
+      "No bar needed. Keeping legs straight, raise them to vertical by curling the pelvis, then lower under control without letting your lower back arch off the floor.",
+      "Curl the pelvis to bring the knees up toward the chest, then lower under control. Small, controlled — not a kick or a swing.",
+      "Raise the knees by curling the pelvis up, not just swinging the legs. Direct, loadable ab work.",
+      "Keeping legs straight, raise them to hip height (or higher) by curling the pelvis, then lower under control. The straight-leg lever is what makes this the hardest rung.",
+    ],
     cue: "Hang from the bar. Raise the knees by curling the pelvis up — not just swinging the legs. Direct, loadable ab work.",
     q: "hanging knee raise exercise"
   },
@@ -284,6 +365,25 @@ const EXERCISES = {
     equip: ["Pull-up bar"],
     setup: "Hang from the bar with an underhand grip (palms toward you), hands shoulder-width.",
     ladder: ["Dead hang (time)", "Scapular pull", "Negative chin (slow lower)", "Chair-assisted chin-up", "Full chin-up", "Weighted chin-up"],
+    // Same rationale as pullup_prog's ladderCue/ladderSetup — grip is underhand throughout, and
+    // rung 3 is chair-assisted (not band-assisted like pullup_prog's rung 3), so this can't share
+    // the pull-up progression's arrays even though the ladders line up 1:1 in structure.
+    ladderSetup: [
+      "Hang from the bar with an underhand grip (palms toward you), arms fully extended, feet off the floor.",
+      "Hang from the bar with an underhand grip, arms straight.",
+      "Jump or step up so your chin is already over the bar, underhand grip.",
+      "Stand on a sturdy chair or step under the bar, underhand grip.",
+      "Hang from the bar with an underhand grip (palms toward you), hands shoulder-width, arms fully extended.",
+      "Add weight with a dip belt, weighted vest, or a loaded backpack, then hang from the bar underhand.",
+    ],
+    ladderCue: [
+      "Just hang — relax into it, brace the core so you don't swing. Timed hold, not reps: build grip and shoulder stability before adding any pulling.",
+      "Without bending the elbows, pull the shoulder blades down and together, then relax back to a dead hang. Small movement, no elbow bend — this is the shoulder-blade set you'll need before the elbows ever bend.",
+      "Start at the top (chin over the bar) and lower yourself as slowly as you can, 3–5+ seconds down. The lowering strength is what lets you pull yourself up in the first place.",
+      "Use your legs to take some of the load on the way up. Push less with your legs each session as you get stronger, until the pull is arms-and-back alone.",
+      "Underhand grip loads the biceps hard plus the back. Lead the chest to the bar, control the lower. Stop 1–2 reps short of failure.",
+      "Same full chin-up technique, now loaded. Lead the chest to the bar, control the lower. Add weight in small jumps once you clear the top of your rep range.",
+    ],
     cue: "Underhand grip (palms toward you) — loads the biceps hard plus the back. Lead the chest to the bar, control the lower. Your main biceps builder until you have load.",
     q: "chin up progression beginner"
   },

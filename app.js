@@ -1213,8 +1213,8 @@ function demoLink(ex) {
 // redundant with it and just clutters the page — collapse to ~2 lines with a tap-to-expand
 // rather than trimming the text itself, so a safety note buried in the 2nd/3rd sentence
 // (e.g. "stop if the shoulder feels unstable") is never silently lost.
-function cueBlock(ex, text) {
-  text = text ?? activeCue(ex);
+function cueBlock(ex, exId) {
+  const text = rungCue(ex, exId);
   if (!ex.q) return `<div class="cue">${esc(text)}</div>`;
   const id = "cue-" + Math.random().toString(36).slice(2, 9);
   return `<div class="cue clamped" id="${id}">${esc(text)}</div><button class="linkbtn cuemore" data-cuetoggle="${id}">More ›</button>`;
@@ -1240,16 +1240,43 @@ function warmupHint(exId) {
 // automatically, but the equip/setup/cue text was left describing the band setup verbatim
 // regardless — "stand on a band" is actively wrong once you're holding a dumbbell instead.
 // These three helpers are the single place that resolves which text is actually current.
-function equipList(ex) { return (ex && Array.isArray(ex.equip)) ? (dumbbellMode(ex) && ex.equipDumbbell ? ex.equipDumbbell : ex.equip).slice() : []; }
+// exId is optional: most callers (session-gear checklist, swap-option previews) want the
+// exercise's baseline gear, not gear for one specific rung. Only when a rung genuinely needs
+// something the other rungs don't (a box to squat onto, a bar to hang from) does ladderEquip
+// override — e.g. hanging_knee's first rung is a FLOOR exercise despite the exercise as a whole
+// needing a pull-up bar.
+function equipList(ex, exId) {
+  const r = ex && ex.ladder && exId != null ? assignedRung(exId) : -1;
+  if (ex && ex.ladderEquip && ex.ladderEquip[r] != null) return ex.ladderEquip[r].slice();
+  return (ex && Array.isArray(ex.equip)) ? (dumbbellMode(ex) && ex.equipDumbbell ? ex.equipDumbbell : ex.equip).slice() : [];
+}
 function activeSetup(ex) { return (dumbbellMode(ex) && ex.setupDumbbell) ? ex.setupDumbbell : (ex && ex.setup); }
 function activeCue(ex) { return (dumbbellMode(ex) && ex.cueDumbbell) ? ex.cueDumbbell : (ex && ex.cue); }
-function equipLine(ex) {
-  const eq = equipList(ex);
+// Some ladders span genuinely DIFFERENT movements per rung, not one movement at increasing
+// difficulty — a dead hang and a weighted pull-up don't share a cue any more than a plank and a
+// bicep curl would. Using the single exercise-level cue/setup for every rung meant instructions
+// like "lead the chest to the bar" were shown — and literally impossible to follow — on a rung
+// that's just a static hang or a shoulder-blade shrug. ladderCue/ladderSetup (parallel arrays,
+// same order as ladder) give the CURRENTLY ASSIGNED rung its own real instructions when present;
+// a ladder where every rung genuinely is the same movement at a different leverage (trx_row,
+// diamond_pushup, dead_hang) has no need for them and keeps using the one exercise-level cue.
+function rungCue(ex, exId) {
+  const r = ex && ex.ladder ? assignedRung(exId) : -1;
+  if (ex && ex.ladderCue && ex.ladderCue[r] != null) return ex.ladderCue[r];
+  return activeCue(ex);
+}
+function rungSetup(ex, exId) {
+  const r = ex && ex.ladder ? assignedRung(exId) : -1;
+  if (ex && ex.ladderSetup && ex.ladderSetup[r] != null) return ex.ladderSetup[r];
+  return activeSetup(ex);
+}
+function equipLine(ex, exId) {
+  const eq = equipList(ex, exId);
   if (!eq.length) return "";
   return `<div class="equipline"><span class="eqk">Equipment</span>${eq.map((e) => `<span class="eqchip">${esc(e)}</span>`).join("")}</div>`;
 }
-function setupLine(ex) {
-  const setup = activeSetup(ex);
+function setupLine(ex, exId) {
+  const setup = rungSetup(ex, exId);
   if (!setup) return "";
   return `<div class="setupline"><span class="eqk">Setup</span><span class="eqv">${esc(setup)}</span></div>`;
 }
@@ -1258,8 +1285,12 @@ function sessionEquip(sess) {
   const out = [];
   for (const blk of sess.blocks)
     for (const rawId of blk.ex) {
-      const ex = EXERCISES[resolveEx(rawId)];
-      for (const e of equipList(ex)) if (!out.includes(e)) out.push(e);
+      const exId = resolveEx(rawId);
+      const ex = EXERCISES[exId];
+      // Rung-aware so a "gather this before you start" list is right even for a ladder rung
+      // that needs something the exercise's other rungs don't (a chair for goblet_squat's box
+      // squat rung, nothing extra for hanging_knee's floor-only first rung).
+      for (const e of equipList(ex, exId)) if (!out.includes(e)) out.push(e);
     }
   return out;
 }
@@ -1392,7 +1423,7 @@ function renderToday() {
       const swapped = exId !== rawId ? `<span class="pill">swapped</span>` : "";
       html += `<div class="ex">
         <div class="row"><div class="name tappable" data-exhist="${exId}">${esc(ex.name)} ›</div><span class="pill">${targetLabel(ex)}</span></div>
-        ${cueBlock(ex)}
+        ${cueBlock(ex, exId)}
         <div class="meta">${!sg.text || sg.text === "No history yet" ? "" : `<span class="pill ${sg.lvl}">${esc(sg.text)}</span>`}${swapped}${demoLink(ex)}</div>
         ${last ? `<div class="lastnote">${esc(last)}</div>` : ""}
       </div>`;
@@ -1608,8 +1639,8 @@ function renderRunner() {
     <div class="card">
       <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${timed ? `${pres.setsCount}× hold` : targetLabel(ex)}</span></div>
       ${ex.ladder ? `<div class="tiny muted" style="margin:-2px 0 4px">Variation: ${esc(displayName)}${timed ? " · timed hold" : ""}</div>` : ""}
-      ${ex.ladder && timed ? `<div class="cue">Hold with good form as long as you can — no reps. Tap ‘time it’ to run the clock.</div>` : cueBlock(ex)}
-      ${equipLine(ex)}${setupLine(ex)}
+      ${ex.ladder && timed ? `<div class="cue">Hold with good form as long as you can — no reps. Tap ‘time it’ to run the clock.</div>` : cueBlock(ex, exId)}
+      ${equipLine(ex, exId)}${setupLine(ex, exId)}
       ${warmupHint(exId)}
       <div class="meta">${ex.cat === "prehab" || (ex.cat === "mobility" && ex.load !== "time") ? "" : `<span class="pill ${prescribeLvl(pres)}">${esc(pres.note)}</span>`}${demoLink(ex)}<button class="linkbtn" id="run-swap">Swap →</button></div>
       ${lastLabel(exId) ? `<div class="lastnote">${esc(lastLabel(exId))}${ex.cat === "prehab" || (ex.cat === "mobility" && ex.load !== "time") ? "" : " → aim to beat it"}</div>` : ""}
@@ -1705,8 +1736,8 @@ function swapReason(exId, reason) {
   const ex = EXERCISES[exId];
   if (reason === "how") {
     res.innerHTML = `<div class="howto">
-      ${equipLine(ex)}${setupLine(ex)}
-      <div class="cue" style="margin-top:6px">${esc(activeCue(ex))}</div>
+      ${equipLine(ex, exId)}${setupLine(ex, exId)}
+      <div class="cue" style="margin-top:6px">${esc(rungCue(ex, exId))}</div>
       <div style="margin-top:8px">${demoLink(ex) || `<span class="tiny muted">No video — follow the setup above.</span>`}</div>
       <div class="tiny muted" style="margin-top:6px">Not swapped. Do it as described, or pick another reason.</div>
     </div>`;
@@ -1751,23 +1782,34 @@ function renderExercise(exId) {
   S.workouts.forEach((w) => { const e = w.entries.find((x) => x.exId === exId); if (e) hist.push({ date: w.date, m: w._m || 0, sets: e.sets, variation: e.variation }); });
   (S.activity || []).forEach((a) => { const e = a.entries.find((x) => x.exId === exId); if (e) hist.push({ date: a.date, m: a._m || 0, sets: e.sets, variation: e.variation, tag: a.type }); });
   hist.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.m - b.m));
+  // For a laddered exercise whose rungs mix timed holds and rep sets (e.g. pull-up progression's
+  // "Dead hang" is seconds, every other rung is reps), charting every entry together as one "top
+  // reps" line means a 45-second hang and an 8-rep pull-up land on the same axis — a jump between
+  // rungs then reads as a huge spike or crash that has nothing to do with actual progress. Only
+  // chart/PR entries whose UNIT matches the currently assigned rung; older entries in a different
+  // unit are still visible in the raw history list below, just not mixed into the same number.
+  const curTimed = ex.ladder ? isTimedVariation(assignedVariation(exId), ex) : null;
+  const sameUnit = (h) => curTimed === null || isTimedVariation(h.variation, ex) === curTimed;
   const pts = [];
-  hist.forEach((h) => { const top = Math.max(0, ...h.sets.map((s) => +s.reps || 0)); if (top) pts.push({ x: pts.length, y: top }); });
+  hist.filter(sameUnit).forEach((h) => { const top = Math.max(0, ...h.sets.map((s) => +s.reps || 0)); if (top) pts.push({ x: pts.length, y: top }); });
   let pr = null;
-  hist.forEach((h) => h.sets.forEach((s) => { const r = +s.reps || 0; if (r > 0 && (!pr || r > pr.reps)) pr = { reps: r, load: s.load }; }));
+  hist.filter(sameUnit).forEach((h) => h.sets.forEach((s) => { const r = +s.reps || 0; if (r > 0 && (!pr || r > pr.reps)) pr = { reps: r, load: s.load }; }));
+  const topLabel = curTimed ? "Top-set time" : "Top-set reps";
+  const prLabel = pr ? (curTimed ? `PR ${fmtDur(pr.reps)}` : `PR ${pr.reps}${pr.load ? "@" + esc(String(pr.load)) : ""}`) : "";
   const rows = hist.slice().reverse().map((h) => {
-    const sets = h.sets.map((s) => `${s.reps ?? "?"}${s.load ? "@" + s.load : ""}${s.rpe ? " (RPE" + s.rpe + ")" : ""}`).join(", ");
+    const timed = isTimedVariation(h.variation, ex);
+    const sets = h.sets.map((s) => `${s.reps == null ? "?" : timed ? fmtDur(s.reps) : s.reps}${s.load ? "@" + s.load : ""}${s.rpe ? " (RPE" + s.rpe + ")" : ""}`).join(", ");
     return `<div class="row small" style="padding:8px 0;border-top:1px solid var(--line)"><span class="muted">${prettyDate(h.date)}${h.variation ? " · " + esc(h.variation) : ""}${h.tag ? ` · ${esc(h.tag)}` : ""}</span><span>${esc(sets)}</span></div>`;
   }).join("");
   VIEW.innerHTML = `
     <button class="btn ghost sm" id="ex-back" style="margin:8px 0 6px">← Back</button>
     <div class="card">
       <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${targetLabel(ex)}</span></div>
-      <div class="cue">${esc(activeCue(ex))}</div>
+      <div class="cue">${esc(rungCue(ex, exId))}</div>
       <div class="meta">${demoLink(ex)}</div>
     </div>
     <div class="card">
-      <div class="row"><div class="name">Top-set reps</div>${pr ? `<span class="pill good">PR ${pr.reps}${pr.load ? "@" + esc(String(pr.load)) : ""}</span>` : ""}</div>
+      <div class="row"><div class="name">${topLabel}</div>${prLabel ? `<span class="pill good">${esc(prLabel)}</span>` : ""}</div>
       ${lineChart(pts, "#8A2B22")}
     </div>
     ${hist.length ? `<div class="card tight"><div class="small muted">History (${hist.length})</div>${rows}</div>` : `<div class="card tight tiny muted">No sessions logged yet.</div>`}`;
