@@ -178,7 +178,14 @@ const EXERCISES = {
     equip: ["Bands", "Anchor point"],
     setup: "Anchor a band high (over a door or the pull-up bar), grip it with both hands, elbows pinned to your sides.",
     cue: "Anchor the band high. Pin the elbows to your sides, extend fully, control back up. Shoulder-friendly triceps work.",
-    q: "band triceps pushdown exercise"
+    // A bent-over dumbbell kickback keeps the same "elbow pinned, extend the forearm" pattern the
+    // band version uses — an overhead extension would be a different plane entirely, not a clean
+    // substitute. Had no equipDumbbell fields at all before, so this never converted even with
+    // the toggle on.
+    equipDumbbell: ["Dumbbells"],
+    setupDumbbell: "Hinge forward at the hips, flat back, a dumbbell in each hand, elbows pinned high at your sides, forearms hanging straight down.",
+    cueDumbbell: "Elbows pinned at your sides, extend the forearms straight back until fully extended, control the return. Same shoulder-friendly triceps isolation as the band version, now resisted by gravity instead of band tension.",
+    q: "dumbbell triceps kickback exercise"
   },
   band_fly: {
     name: "Band Chest Fly", cat: "push", muscle: "chest", load: "band", target: { sets: 3, lo: 12, hi: 15 },
@@ -195,6 +202,14 @@ const EXERCISES = {
     equip: ["Bands or dumbbells"],
     setup: "Stand on the middle of a band with a handle in each hand (or hold a light weight / water bottle in each hand) at your sides.",
     cue: "Raise out to shoulder height, slight forward tilt, pinkies leading; control the descent. Light and strict — this is the side-delt 'cap' for shoulder width. Water bottles work if you've no bands/dumbbells yet.",
+    // The base setup/cue already mentioned dumbbells inline as a workaround, but with no
+    // equipDumbbell fields the equipment chip stayed "Bands or dumbbells" forever even in
+    // dumbbell mode, and isNumericLoad() already treats this as a weighted/progressable
+    // exercise once the toggle is on (the name matches the dumbbellMode regex) — so the app was
+    // tracking it as weight-based without ever cleanly saying so.
+    equipDumbbell: ["Dumbbells"],
+    setupDumbbell: "Stand tall, a dumbbell in each hand at your sides.",
+    cueDumbbell: "Raise out to shoulder height, slight forward tilt, pinkies leading; control the descent. Light and strict — this is the side-delt 'cap' for shoulder width.",
     q: "dumbbell lateral raise side delt form"
   },
   band_upright_row: {
@@ -224,7 +239,12 @@ const EXERCISES = {
     equip: ["Bands or dumbbells"],
     setup: "Stand on a band (or hold a weight in each hand) with a neutral grip, thumbs up, elbows pinned.",
     cue: "Palms neutral (thumbs up), curl with control. Trains the brachialis under the biceps — adds thickness and pushes the peak up. Load it: dumbbells beat bands here.",
-    q: "hammer curl exercise"
+    // Same gap as lateral_raise: no equipDumbbell fields despite the cue itself saying dumbbells
+    // are the better tool, so the equipment chip and setup text never actually switched over.
+    equipDumbbell: ["Dumbbells"],
+    setupDumbbell: "Hold a dumbbell in each hand with a neutral grip (palms facing each other), elbows pinned.",
+    cueDumbbell: "Palms neutral (thumbs up), curl with control. Trains the brachialis under the biceps — adds thickness and pushes the peak up.",
+    q: "dumbbell hammer curl exercise"
   },
 
   // ---- Legs ----
@@ -352,10 +372,26 @@ const EXERCISES = {
     q: "rowing machine technique pace"
   },
   row_intervals: {
-    name: "Rower — Intervals", cat: "cond", load: "cardio", target: { sets: 6, sec: 30 }, restSec: 60,
+    name: "Rower — Intervals", cat: "cond", load: "cardio", target: { sets: 12 },
+    // 6 rounds of 30s hard / 60s easy, modeled as 12 SEPARATE alternating sets — not 6 sets that
+    // each secretly bundle a hard AND an easy phase into one timer/target. The old bundled model
+    // made "beat your stroke rate" ambiguous (one strokes field covering both a 30s hard push and
+    // a 60s easy paddle can't mean anything), and it silently chained a 60s rest onto EVERY one
+    // of the 6 rows on top of the 60s easy phase already being logged as its own thing — meaning
+    // a full round of hard+easy was really hard+easy+ANOTHER 60s, not the intended hard+easy.
+    // Each entry here is its own set: its own timer, its own single target, no auto-chained rest
+    // tacked on afterward — the easy set immediately following a hard one already IS the rest.
+    intervalPattern: [
+      { sec: 30, phase: "hard" }, { sec: 60, phase: "easy" },
+      { sec: 30, phase: "hard" }, { sec: 60, phase: "easy" },
+      { sec: 30, phase: "hard" }, { sec: 60, phase: "easy" },
+      { sec: 30, phase: "hard" }, { sec: 60, phase: "easy" },
+      { sec: 30, phase: "hard" }, { sec: 60, phase: "easy" },
+      { sec: 30, phase: "hard" }, { sec: 60, phase: "easy" },
+    ],
     equip: ["Rower"],
-    setup: "Strap your feet in, grip the handle. Each set is 30s hard / 60s easy.",
-    cue: "30s hard / 60s easy. Tap Start to run the 30s countdown — it chains straight into a 60s rest for you. Log your STROKE COUNT for the 30s once it's done — that's what should improve round to round, not the duration, which is fixed.",
+    setup: "Strap your feet in, grip the handle.",
+    cue: "6 rounds of 30s HARD then 60s EASY — but each is its own separate set, not one combined set. Tap a hard set's timer and push the pace; log your strokes when it ends. Tap the easy set right after it and just paddle — nothing to log, it's pure recovery. Repeat.",
     q: "rowing machine interval workout technique"
   },
 

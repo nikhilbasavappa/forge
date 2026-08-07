@@ -261,6 +261,7 @@ input::placeholder { color: var(--mut); opacity: 0.7; }
   box-shadow: 0 6px 20px rgba(0,0,0,0.25);
 }
 .rest-bar.hold, .rest-bar.work { background: var(--ox); }
+.rest-bar.work.easy { background: var(--ink-2); } /* calmer than the hard-effort orange — this bar IS the recovery, not a warning */
 .rest-bar .rest-t { font-family: var(--m); font-size: 1.4rem; font-weight: 700; min-width: 64px; text-align: center; }
 .rest-bar .rest-lbl { font-family: var(--m); font-size: 0.7rem; letter-spacing: 0.1em; font-weight: 700; }
 .holdbtn { padding: 10px 2px; font-size: 0.7rem; white-space: nowrap; letter-spacing: 0; }

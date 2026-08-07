@@ -17,6 +17,11 @@ const DEFAULT_STATE = {
   swaps: {},              // exId -> replacement exId (persistent)
   ladders: {},            // exId -> current rung index (which variation the app has assigned)
   deloadWeek: null,       // weekStart string when a deload week is active
+  // Dedicated per-field timestamps so a sync merge can compare "when did equipment/swaps
+  // actually change" instead of falling back to the whole-state-blob _m, which is bumped by ANY
+  // save on either device (a measurement, a walk, anything) — see mergeStates()'s comment.
+  _equipmentM: 0,
+  _swapsM: 0,
 };
 
 let S = load();
@@ -118,7 +123,17 @@ function mergeStates(a, b) {
   const ladderIds = new Set([...Object.keys(a.ladders || {}), ...Object.keys(b.ladders || {})]);
   out.ladders = {};
   ladderIds.forEach((id) => { out.ladders[id] = Math.max((a.ladders || {})[id] || 0, (b.ladders || {})[id] || 0); });
-  if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.equipment = b.equipment; out.swaps = b.swaps; out.deloadWeek = b.deloadWeek; out._m = b._m; }
+  // equipment (the "I have dumbbells" toggle) and swaps (band→dumbbell/bodyweight substitutions)
+  // used to ride the same whole-blob _m last-writer-wins as everything else below — meaning
+  // turning dumbbells ON, then having ANY OTHER save happen on a device that hadn't picked that
+  // up yet (a logged set, a walk, literally anything with a newer _m), would silently flip the
+  // toggle back off on the next sync. Same bug class as the ladder fix above, same fix: compare
+  // a timestamp that only moves when THIS field actually changes, not whenever the blob does.
+  out.equipment = ((b._equipmentM || 0) > (a._equipmentM || 0)) ? b.equipment : a.equipment;
+  out._equipmentM = Math.max(a._equipmentM || 0, b._equipmentM || 0);
+  out.swaps = ((b._swapsM || 0) > (a._swapsM || 0)) ? b.swaps : a.swaps;
+  out._swapsM = Math.max(a._swapsM || 0, b._swapsM || 0);
+  if ((b._m || 0) > (a._m || 0)) { out.profile = b.profile; out.deloadWeek = b.deloadWeek; out._m = b._m; }
   return out;
 }
 
@@ -313,7 +328,10 @@ function isBodyweightMode() { return typeof BW_SWAPS !== "undefined" && S.swaps 
 // crossover or pallof's side anchor. The regex alone can't tell "this band move happens to
 // share a verb with a real dumbbell exercise" from "this band move IS a real dumbbell
 // exercise," so exercises that fail that distinction opt out explicitly.
-function dumbbellMode(ex) { return S.equipment && S.equipment.dumbbells && ex.load === "band" && !ex.noDumbbellMode && /curl|press|fly|row|squat|rdl|pressdown|raise/i.test(ex.name + " " + (ex.cat || "")); }
+// "pressdown" was a typo — the actual exercise is named "Pushdown" (Band Triceps Pushdown), so
+// it never matched and never converted to dumbbell mode even with the toggle on and equipDumbbell
+// fields defined. Kept both so a future rename either direction still matches.
+function dumbbellMode(ex) { return S.equipment && S.equipment.dumbbells && ex.load === "band" && !ex.noDumbbellMode && /curl|press|fly|row|squat|rdl|pressdown|pushdown|raise/i.test(ex.name + " " + (ex.cat || "")); }
 // Numeric-load exercises are the ones the weight-progression engine can auto-step:
 // dumbbell-mode band moves once dumbbells are on, anything already tracked in lb (backpack
 // curl), OR a laddered bodyweight exercise that's reached its "Weighted" terminal rung
@@ -661,14 +679,27 @@ function lastCardio(exId, setIndex) {
   const set = setIndex != null ? l.entry.sets[setIndex] : l.entry.sets.find((s) => s.dist != null);
   return (set && set.dist != null) ? { dist: +set.dist, time: +set.reps || null } : null;
 }
-function cardioTarget(exId, ex, setIndex, setsCount) {
+// sec/phase describe THIS set specifically (from prescribe()'s perSet[i]) rather than reading a
+// single ex.target.sec, since an alternating protocol (row_intervals) has a different duration
+// per set — a hard set and the easy set right after it are not interchangeable durations.
+function cardioTarget(exId, ex, setIndex, setsCount, sec, phase) {
+  sec = sec ?? ex.target.sec;
+  // Easy sets are deliberate recovery, not a performance to chase — there's nothing to "beat"
+  // and nothing to log, so saying so directly beats reusing the hard-set "beat your strokes"
+  // framing on a set where that framing doesn't apply.
+  if (phase === "easy") {
+    const roundNum = Math.floor(setIndex / 2) + 1, totalRounds = Math.ceil(setsCount / 2);
+    return `Round ${roundNum} of ${totalRounds} — easy recovery, no target. Just keep moving.`;
+  }
   const lc = lastCardio(exId, setIndex);
   // Repeating the identical text on every one of N identical-looking rows reads as the app not
   // tracking anything at all — label which round it is so it's clear each row IS distinct, even
-  // when (as on a first session) there's nothing yet to compare it against.
-  const roundLabel = setsCount > 1 ? `Round ${setIndex + 1} of ${setsCount} — ` : "";
-  if (lc) { const p = strokeRate(lc.dist, lc.time || ex.target.sec); return `${roundLabel}beat ${lc.dist} strokes in ${fmtDur(ex.target.sec)}${p ? " · " + p : ""}`; }
-  return `${roundLabel}${fmtDur(ex.target.sec)} — log your strokes`;
+  // when (as on a first session) there's nothing yet to compare it against. For an alternating
+  // protocol, "round" means a hard/easy PAIR, not the raw set index — set index 4 is round 3.
+  const roundLabel = phase === "hard" ? `Round ${Math.floor(setIndex / 2) + 1} of ${Math.ceil(setsCount / 2)} — `
+    : setsCount > 1 ? `Round ${setIndex + 1} of ${setsCount} — ` : "";
+  if (lc) { const p = strokeRate(lc.dist, lc.time || sec); return `${roundLabel}beat ${lc.dist} strokes in ${fmtDur(sec)}${p ? " · " + p : ""}`; }
+  return `${roundLabel}${fmtDur(sec)} — log your strokes`;
 }
 
 // Safety net: a rep-based prescription under ~20 total reps isn't much of a stimulus
@@ -695,6 +726,14 @@ function applyVolumeFloor(setsCount, perSet, ex) {
 function prescribe(exId) {
   const ex = EXERCISES[exId];
   if (ex.load === "cardio") {
+    // Alternating protocols (row_intervals) are a sequence of DIFFERENT sets — some hard, some
+    // easy — each with its own duration, not N identical sets sharing one duration. phase carries
+    // through to cardioTarget/the runner so a hard set asks you to beat your stroke rate and an
+    // easy set asks for nothing at all (it's recovery, there's no metric to chase).
+    if (ex.intervalPattern) {
+      const perSet = ex.intervalPattern.map((ph) => ({ reps: ph.sec, phase: ph.phase }));
+      return { setsCount: perSet.length, perSet, note: "Hard sets: beat your stroke rate. Easy sets: just recover — nothing to log." };
+    }
     // Multiple sets means repeated hard efforts (rower intervals), not one continuous piece
     // (rower steady-state) — the baseline note shouldn't call an interval "steady pace."
     const baseNote = ex.target.sets > 1 ? "Hard effort — log your strokes" : "Steady pace — log your strokes";
@@ -1087,30 +1126,41 @@ function startHold(exId, setIdx) {
     renderRunner();
   };
 }
-/* work-interval countdown for cardio intervals (row_intervals: 30s hard). Counts DOWN, unlike
-   the count-up hold timer, since the work duration is fixed by the protocol, not something to
-   hold "as long as you can". Chains straight into the exercise's own rest duration (ex.restSec,
-   falling back to the profile default) on completion, so "30s hard / 60s easy" is something the
-   app actually runs for you, not just a line of cue text you have to self-time against. */
+/* work-interval countdown for cardio sets (row_intervals: alternating 30s hard / 60s easy).
+   Counts DOWN, unlike the count-up hold timer, since the duration is fixed by the protocol, not
+   something to hold "as long as you can". EACH SET (from prescribe()'s perSet, which is what
+   this reads — not a single ex.target.sec shared by every row) runs its own duration and its own
+   label; it does NOT auto-chain into a rest afterward. That used to double up the recovery — a
+   30s hard set finishing would silently also start a 60s "rest" bar, stacked on top of the 60s
+   easy SET immediately following it in the list — so a round was really hard + easy + an extra
+   unrelated 60s, not the intended hard + easy. The easy set right after a hard one already IS
+   the rest; nothing needs to run automatically on top of it.  */
 let workInt = null, workEnd = 0;
 function stopWorkTimer() { if (workInt) clearInterval(workInt); workInt = null; const b = document.getElementById("work-bar"); if (b) b.remove(); }
 function startInterval(exId, setIdx) {
   const ex = EXERCISES[exId];
+  const pres = prescribe(exId);
+  const set = pres.perSet[setIdx] || {};
+  const sec = set.reps || ex.target.sec;
+  const phase = set.phase; // "hard" | "easy" | undefined (a plain fixed-duration cardio piece)
   stopWorkTimer(); stopHoldTimer(); stopRest();
-  const sec = ex.target.sec;
   workEnd = Date.now() + sec * 1000;
   const bar = document.createElement("div");
-  bar.id = "work-bar"; bar.className = "rest-bar work";
-  bar.innerHTML = `<span class="rest-lbl">HARD</span><span class="rest-t" id="work-t">${fmtClock(sec)}</span><button class="rest-x" id="work-skip">SKIP</button>`;
+  bar.id = "work-bar"; bar.className = `rest-bar work${phase === "easy" ? " easy" : ""}`;
+  bar.innerHTML = `<span class="rest-lbl">${phase ? phase.toUpperCase() : "GO"}</span><span class="rest-t" id="work-t">${fmtClock(sec)}</span><button class="rest-x" id="work-skip">SKIP</button>`;
   document.body.appendChild(bar);
   const finish = () => {
     stopWorkTimer();
-    restBeep(); if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    restBeep(); if (navigator.vibrate) navigator.vibrate(phase === "easy" ? 120 : [200, 100, 200]);
     RUN.data[exId] = RUN.data[exId] || [];
     RUN.data[exId][setIdx] = RUN.data[exId][setIdx] || { reps: null, load: null, dist: null, unit: null, rpe: null, done: false };
     RUN.data[exId][setIdx].reps = sec;
+    RUN.data[exId][setIdx].done = true;
     saveRun();
-    startRest(ex.restSec || S.profile.restDefault || 90);
+    // Only a legacy fixed-duration cardio exercise with an explicit restSec (none currently
+    // defined — row_intervals now models hard/easy as separate sets instead) auto-chains a rest.
+    // An alternating set (phase is set) never does; see the comment above this function.
+    if (!phase && ex.restSec) startRest(ex.restSec);
     renderRunner();
   };
   const tick = () => {
@@ -1200,7 +1250,14 @@ document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () 
 
 /* ---------- target label ---------- */
 function targetLabel(ex) {
-  if (ex.load === "cardio") return `${fmtDur(ex.target.sec)} · strokes`;
+  if (ex.load === "cardio") {
+    if (ex.intervalPattern) {
+      const rounds = ex.intervalPattern.length / 2;
+      const hard = ex.intervalPattern.find((p) => p.phase === "hard"), easy = ex.intervalPattern.find((p) => p.phase === "easy");
+      return `${rounds}× ${fmtDur(hard.sec)} hard / ${fmtDur(easy.sec)} easy`;
+    }
+    return `${fmtDur(ex.target.sec)} · strokes`;
+  }
   if (ex.load === "time") return `${ex.target.sets}×${fmtDur(ex.target.sec)}`;
   return `${ex.target.sets}×${ex.target.lo}–${ex.target.hi}${ex.side ? "/side" : ""}`;
 }
@@ -1566,7 +1623,7 @@ function renderRunner() {
     const cellVal = cardio ? (ev && ev.dist != null ? ev.dist : "") : (ev && ev.load != null ? ev.load : (p.load ?? ""));
     const rpeVal = ev && ev.rpe ? ev.rpe : "";
     let tgt;
-    if (cardio) tgt = cardioTarget(exId, ex, i, pres.setsCount);
+    if (cardio) tgt = cardioTarget(exId, ex, i, pres.setsCount, p.reps, p.phase);
     else if (timed && ex.ladder && ex.load !== "time") {
       // A timed ladder rung on an otherwise reps-based exercise (chinup_prog/pullup_prog's
       // dead hang start) — not a genuine timed exercise that's meant to keep climbing forever,
@@ -1602,19 +1659,19 @@ function renderRunner() {
     // leg after?). Applied uniformly after tgt is finalized so it covers every branch above
     // (timed holds, prehab/mobility, and normal reps/load) without duplicating the logic three times.
     if (ex.side && !cardio) tgt += " · each side";
-    const cellHtml = timed ? `<button class="qbtn holdbtn" data-hold="${i}">⏱ time it</button>` : runnerLoadCell({ ...ex, load: effLoad }, i, cellVal);
+    // An easy set (row_intervals) is pure recovery — there's no metric to chase, so the strokes
+    // input is just noise there; a hard set still gets it. Anything non-cardio is unaffected.
+    const cellHtml = timed ? `<button class="qbtn holdbtn" data-hold="${i}">⏱ time it</button>`
+      : (cardio && p.phase === "easy") ? `<div class="tiny muted center">recovery</div>`
+      : runnerLoadCell({ ...ex, load: effLoad }, i, cellVal);
     // Any cardio exercise gets an actual countdown instead of a plain editable number — both
-    // row_intervals (30s hard, auto-chains a 60s rest between rounds) and row_steady (one
-    // continuous 5:00 piece, chains the generic post-set rest same as finishing any other set)
-    // should be something the app times for you, not just cue text you self-time against a
-    // watch. Only skips the countdown for a value already typed/carried forward from history.
-    // ex.restSec (row_intervals only, not row_steady's single continuous piece) means this
-    // exercise has a real hard/easy protocol, not just a duration to start and stop — say so
-    // on the button itself. Previously it just read "Start 30s" on every row with no mention
-    // of the 60s that follows, so the interval structure was invisible until you'd already used
-    // it once and discovered the rest chained in on its own.
+    // row_intervals and row_steady (one continuous 5:00 piece) should be something the app times
+    // for you, not just cue text you self-time against a watch. row_intervals is a sequence of
+    // separately-timed, separately-labeled hard/easy sets (see prescribe()) — each button only
+    // ever runs ITS OWN set's duration; nothing auto-chains into the next set or an extra rest,
+    // since the very next row (the easy set right after a hard one) already IS the recovery.
     const col1Cell = cardio
-      ? `<button class="qbtn holdbtn" data-interval="${i}">▶ ${ex.restSec ? `${fmtDur(ex.target.sec)} hard → ${fmtDur(ex.restSec)} easy` : `Start ${fmtDur(ex.target.sec)}`}</button>`
+      ? `<button class="qbtn holdbtn${p.phase === "easy" ? " easybtn" : ""}" data-interval="${i}">▶ ${p.phase ? `${fmtDur(p.reps)} ${p.phase}` : `Start ${fmtDur(p.reps)}`}</button>`
       : `<input data-set="${i}" data-f="reps" inputmode="numeric" placeholder="${cardio || timed ? "sec" : "reps"}" value="${esc(repsVal)}" />`;
     rows += `<div class="setrow">
       <button class="setdone ${ev && ev.done ? "on" : ""}" data-set="${i}" title="mark done + rest">${i + 1}</button>
@@ -1770,7 +1827,7 @@ function swapAltList(exId, reason) {
 function applySwap(altId) {
   const cur = RUN.list[RUN.idx];
   const origId = (RUN.rawList || RUN.list).find((o) => resolveEx(o) === cur) || cur;
-  S.swaps[origId] = altId; S._m = Date.now(); save();
+  S.swaps[origId] = altId; S._m = Date.now(); S._swapsM = S._m; save();
   RUN.list[RUN.idx] = altId; saveRun(); renderRunner();
 }
 
@@ -2686,16 +2743,16 @@ function renderMore() {
   };
   document.querySelectorAll("#equip-flags .flagbtn").forEach((b) => b.onclick = () => {
     S.equipment[b.dataset.equip] = !S.equipment[b.dataset.equip];
-    S._m = Date.now(); save(); b.classList.toggle("on", S.equipment[b.dataset.equip]);
+    S._m = Date.now(); S._equipmentM = S._m; save(); b.classList.toggle("on", S.equipment[b.dataset.equip]);
   });
   const bw = document.getElementById("bw-mode");
   if (bw) bw.onclick = () => {
     if (isBodyweightMode()) { for (const k of Object.keys(BW_SWAPS)) delete S.swaps[k]; toast("Band program restored"); }
     else { S.swaps = Object.assign({}, S.swaps, BW_SWAPS); toast("Bodyweight mode on"); }
-    S._m = Date.now(); save(); renderMore();
+    S._m = Date.now(); S._swapsM = S._m; save(); renderMore();
   };
   const rs = document.getElementById("reset-swaps");
-  if (rs) rs.onclick = () => { S.swaps = {}; S._m = Date.now(); save(); toast("Swaps reset"); renderMore(); };
+  if (rs) rs.onclick = () => { S.swaps = {}; S._m = Date.now(); S._swapsM = S._m; save(); toast("Swaps reset"); renderMore(); };
   document.getElementById("reset").onclick = () => {
     if (confirm("Erase ALL workouts, check-ins, and measurements? This cannot be undone.")) {
       S = structuredClone(DEFAULT_STATE); save(); toast("Reset"); setTab("today");
