@@ -4,7 +4,10 @@
 const KEY = "forge.v1";
 const DEFAULT_STATE = {
   v: 1,
-  profile: { heightIn: 68, startWeight: 155, proteinTarget: 155, weeklyTarget: 4, restDefault: 90, walkTarget: 30, dumbbellStep: 5 },
+  // maxLoad (lb, optional): the heaviest single dumbbell/band-equivalent load you actually own.
+  // Once a numeric-load exercise reaches it, "add load" stops being offered (there's nothing
+  // heavier to grab) and reps become the progression axis instead — see effectiveHi().
+  profile: { heightIn: 68, startWeight: 155, proteinTarget: 155, weeklyTarget: 4, restDefault: 90, walkTarget: 30, dumbbellStep: 5, maxLoad: null },
   todaySession: null,     // {date, sess} — cached generated session so it doesn't reshuffle on every re-render (see getTodaySession)
   recentTopMuscles: [],   // rolling list of muscles that got session-title billing recently — cooldown so the same 2-3 don't dominate every title (see generateSession)
   workouts: [],           // {id, date, sessionKey, entries:[{exId, variation, sets:[{reps,load,unit,rpe}]}], note} — sessionKey now holds a generated title string, not a fixed A/B/C key
@@ -13,9 +16,10 @@ const DEFAULT_STATE = {
   nutrition: [],          // {date, protein(g), _m}
   walks: [],              // {date, min, _m}
   activity: [],           // {id, date, type:'prehab'|'mobility', title, entries:[{exId, variation, sets}], _m} — off-day rehab/mobility, logged separately from real sessions
-  equipment: { dumbbells: false, suspension: false }, // bands + pull-up bar + rower assumed
+  equipment: { dumbbells: false, suspension: false, bandsMaxed: false }, // bands + pull-up bar + rower assumed
   swaps: {},              // exId -> replacement exId (persistent)
   ladders: {},            // exId -> current rung index (which variation the app has assigned)
+  repCeilings: {},        // exId -> extended rep ceiling once resistance (band tension or profile.maxLoad) is maxed out — see effectiveHi()
   deloadWeek: null,       // weekStart string when a deload week is active
   // Dedicated per-field timestamps so a sync merge can compare "when did equipment/swaps
   // actually change" instead of falling back to the whole-state-blob _m, which is bumped by ANY
@@ -123,6 +127,11 @@ function mergeStates(a, b) {
   const ladderIds = new Set([...Object.keys(a.ladders || {}), ...Object.keys(b.ladders || {})]);
   out.ladders = {};
   ladderIds.forEach((id) => { out.ladders[id] = Math.max((a.ladders || {})[id] || 0, (b.ladders || {})[id] || 0); });
+  // Same monotonic reasoning as ladders — an extended rep ceiling is progress, not a setting;
+  // last-writer-wins could silently revert it just like it could a ladder rung.
+  const ceilingIds = new Set([...Object.keys(a.repCeilings || {}), ...Object.keys(b.repCeilings || {})]);
+  out.repCeilings = {};
+  ceilingIds.forEach((id) => { out.repCeilings[id] = Math.max((a.repCeilings || {})[id] || 0, (b.repCeilings || {})[id] || 0); });
   // equipment (the "I have dumbbells" toggle) and swaps (band→dumbbell/bodyweight substitutions)
   // used to ride the same whole-blob _m last-writer-wins as everything else below — meaning
   // turning dumbbells ON, then having ANY OTHER save happen on a device that hadn't picked that
@@ -345,6 +354,48 @@ function isNumericLoad(ex, exId) {
   return false;
 }
 function loadStep(ex) { return (S.profile && +S.profile.dumbbellStep) || 5; }
+// Once resistance is genuinely maxed — a band with no more tension to add, or a numeric load
+// already at the equipment ceiling the user told us they own (S.profile.maxLoad) — "add load" /
+// "use a firmer band" stops being an actionable instruction. Clearing the printed rep range used
+// to just reset you back to the bottom of that SAME range at the SAME resistance forever, with a
+// suggestion to buy equipment you may not be able to. S.repCeilings[exId] tracks an extended
+// ceiling (bumped by advanceRepCeilings() in finishRun(), same pattern as ladder rungs) so reps
+// become the ongoing progression axis instead — automatic, no purchase or manual tracking needed.
+// Only kicks in for a load-based exercise once actually AT the stated ceiling; below that, normal
+// load-stepping is still the right lever and the printed range stays as-is.
+// Standalone from effectiveHi() below on purpose — comparing effectiveHi()'s return value to
+// ex.target.hi to decide "is this maxed" doesn't work on the FIRST session that hits the ceiling,
+// since S.repCeilings[exId] hasn't been bumped yet at that point (that happens afterward, in
+// advanceRepCeilings()) — effectiveHi() would still equal the plain printed hi that session,
+// making it indistinguishable from "not maxed at all". This checks the maxed CONDITION directly.
+function isResistanceMaxed(ex, exId) {
+  const numericLoad = isNumericLoad(ex, exId);
+  const bandOnly = ex.load === "band" && !numericLoad;
+  if (numericLoad && S.profile.maxLoad) {
+    const last = lastEntry(exId, ex.ladder ? assignedVariation(exId) : undefined);
+    const lastLoad = last ? Math.max(0, ...last.entry.sets.map((s) => (s.load != null && isFinite(+s.load)) ? +s.load : 0)) : 0;
+    return lastLoad >= S.profile.maxLoad;
+  }
+  if (bandOnly) {
+    // Unlike a numeric load, band tension isn't something the app can read a number off of —
+    // it can't tell "you cleared the range, try your NEXT firmer band" (still the right move if
+    // you own one) apart from "you've genuinely run out of bands." Defaulting to the ceiling-
+    // extension the instant anyone clears a band exercise's range would silently stop suggesting
+    // a firmer band even for someone who owns a whole set and just hasn't grabbed the next one —
+    // so this only activates once the user explicitly says they're maxed (More → Equipment).
+    return !!(S.equipment && S.equipment.bandsMaxed);
+  }
+  return false;
+}
+// The actual next target: the printed range's top, UNLESS resistance is maxed, in which case an
+// already-extended S.repCeilings value (bumped by advanceRepCeilings() once a maxed exercise
+// clears it) takes over — 0/absent the first time this fires, so it still returns the plain
+// printed hi until advanceRepCeilings() has actually raised it after that session.
+function effectiveHi(ex, exId) {
+  if (!ex.target || ex.target.hi == null) return ex.target ? ex.target.hi : undefined;
+  if (!isResistanceMaxed(ex, exId)) return ex.target.hi;
+  return Math.max(ex.target.hi, (S.repCeilings && S.repCeilings[exId]) || 0);
+}
 
 /* ---------- smart engine: readiness, momentum, stalls, cadence ---------- */
 function daysBetween(a, b) { return Math.round((new Date(b.replace(/-/g, "/")) - new Date(a.replace(/-/g, "/"))) / 86400000); }
@@ -391,7 +442,7 @@ function exHistory(exId, variation, beforeDate) {
 function momentum(exId, ex, beforeDate) {
   if (ex.load === "time" || ex.load === "cardio") return false;
   const h = exHistory(exId, ex.ladder ? assignedVariation(exId) : undefined, beforeDate); if (h.length < 2) return false;
-  return h.slice(-2).every((s) => s.top >= ex.target.hi && (!s.rpe || s.rpe <= 8));
+  return h.slice(-2).every((s) => s.top >= effectiveHi(ex, exId) && (!s.rpe || s.rpe <= 8));
 }
 // Stalled = no rep PR AND no load increase across 3 sessions — weight-aware so a session
 // right after a load step-up (reps intentionally reset to the low end) isn't misread as a plateau.
@@ -822,6 +873,12 @@ function prescribe(exId) {
   const lastSets = last.entry.sets.filter((s) => s.reps != null || s.load != null);
   const numericLoad = isNumericLoad(ex, exId);
   const step = loadStep(ex);
+  // See effectiveHi()'s/isResistanceMaxed()'s comments: once resistance is genuinely maxed (band
+  // tension, or a numeric load already at S.profile.maxLoad), the printed range's top is no
+  // longer the real target — an already-extended S.repCeilings value (or the plain printed hi,
+  // if not maxed yet) is, and load-stepping stops (there's nothing heavier to move to).
+  const ceilingMaxed = ex.load !== "time" && isResistanceMaxed(ex, exId);
+  const hi = effectiveHi(ex, exId);
   const perSet = [];
   let anyAdd = false, steppedTo = null;
   for (let i = 0; i < setsCount; i++) {
@@ -835,15 +892,16 @@ function prescribe(exId) {
       // The last set of an exercise is intentionally pushed close to failure now (see the
       // per-set target guidance in the runner) — clearing the range ON that set is a stronger
       // signal to progress, not a weaker one, so only earlier sets get the RPE<=8 gate.
-      const hitTop = r >= ex.target.hi && (i === setsCount - 1 || !ls.rpe || ls.rpe <= 8);
+      const hitTop = r >= hi && (i === setsCount - 1 || !ls.rpe || ls.rpe <= 8);
       if (hitTop) anyAdd = true;
       // Double progression: climb reps to the top of the range, then on the NEXT session
       // reset reps to the bottom and step the weight up — for numeric-load exercises this
-      // is computed and pre-filled automatically; you can still type over it.
+      // is computed and pre-filled automatically; you can still type over it. Maxed-out
+      // resistance skips load-stepping entirely — there's nothing heavier to move to.
       const lastLoadNum = numericLoad && ls.load != null && ls.load !== "" && isFinite(+ls.load) ? +ls.load : null;
       let nextLoad = ls.load ?? null, loadStepped = false;
-      if (hitTop && numericLoad && lastLoadNum != null) { nextLoad = lastLoadNum + step; loadStepped = true; steppedTo = nextLoad; }
-      perSet.push({ reps: hitTop ? ex.target.lo : Math.min(ex.target.hi, r + 1), last: lastReps, load: nextLoad, addLoad: hitTop, loadStepped, prevLoad: lastLoadNum });
+      if (hitTop && numericLoad && lastLoadNum != null && !ceilingMaxed) { nextLoad = lastLoadNum + step; loadStepped = true; steppedTo = nextLoad; }
+      perSet.push({ reps: hitTop ? ex.target.lo : Math.min(hi, r + 1), last: lastReps, load: nextLoad, addLoad: hitTop, loadStepped, prevLoad: lastLoadNum });
     }
   }
   if (deload) {
@@ -851,17 +909,16 @@ function prescribe(exId) {
     return { setsCount, perSet, note: "Deload — lighter, leave 2–3 reps in reserve" };
   }
   // "Add load" only makes physical sense when a numeric load actually exists (dumbbells on,
-  // or a genuine weight-tracked movement). For a bodyweight exercise with no ladder either
-  // (prone row, bird dog, etc.) there's no mechanical way to progress difficulty in-app beyond
-  // more reps/sets — and "add tempo or pause reps" was fabricated advice for a feature that
-  // doesn't exist (the app tracks neither). The real lever for that case is the rep-range cycle
-  // itself (reps reset to lo and climb back to hi, computed above) — that already runs
-  // automatically with no user action, so there's nothing else honest to suggest.
-  // A plain band (not in dumbbell mode) has tension to firm up, not a numeric "load" to add —
-  // isNumericLoad(ex, exId) is true for a genuine weight-tracked exercise or a band running in
-  // dumbbell mode; a band outside that is bandOnly and gets band-appropriate phrasing instead.
-  const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex, exId);
-  const bandOnly = ex.load === "band" && !isNumericLoad(ex, exId);
+  // or a genuine weight-tracked movement) AND there's still room to add it. For a bodyweight
+  // exercise with no ladder either (prone row, bird dog, etc.) there's no mechanical way to
+  // progress difficulty in-app beyond more reps/sets — and "add tempo or pause reps" was
+  // fabricated advice for a feature that doesn't exist (the app tracks neither). The real lever
+  // for that case is the rep-range cycle itself (reps reset to lo and climb back to hi, computed
+  // above) — that already runs automatically with no user action, so there's nothing else honest
+  // to suggest. Same now applies once resistance is maxed (ceilingMaxed): "add load"/"use a
+  // firmer band" is replaced with the honest, still-automatic "extended rep target" framing.
+  const hasNumericLoad = (ex.load === "weight" || isNumericLoad(ex, exId)) && !ceilingMaxed;
+  const bandOnly = ex.load === "band" && !isNumericLoad(ex, exId) && !ceilingMaxed;
   // "Move up to a harder variation" is impossible at a ladder's LAST rung — there's nowhere
   // higher to go. At that point (Weighted pull-up/chin-up, Weighted/band push-up) the real
   // lever is adding more load, which is exactly what hasNumericLoad now correctly detects there.
@@ -870,7 +927,7 @@ function prescribe(exId) {
   let note;
   if (rd && rd.band === "low") note = "Low readiness — one fewer set, but push the ones you do";
   else if (mo) note = rd && rd.band === "primed" ? `Primed + cruising — add a set${harderText ? " and " + harderText : ""}` : (harderText ? `Cruising — ${harderText}` : "Cruising");
-  else if (anyAdd) note = steppedTo != null ? `Cleared the range — stepped up to ${steppedTo}lb` : (harderText ? `Cleared the range — ${harderText}` : "Cleared the range");
+  else if (anyAdd) note = steppedTo != null ? `Cleared the range — stepped up to ${steppedTo}lb` : ceilingMaxed ? "Cleared the range — maxed out, rep target raised" : (harderText ? `Cleared the range — ${harderText}` : "Cleared the range");
   else note = ex.load === "time" ? "Beat last time's hold" : "Beat last time's reps";
   let finalSets = setsCount, finalPerSet = perSet;
   ({ setsCount: finalSets, perSet: finalPerSet } = applyVolumeFloor(finalSets, finalPerSet, ex));
@@ -936,11 +993,15 @@ function suggest(exId) {
   if (isStalled(exId, ex)) return { lvl: "warn", text: "Stalled 3 sessions: swap or deload this lift" };
   if (rd && rd.band === "low") return { lvl: "warn", text: "Low readiness: cut sets, keep form" };
   if (momentum(exId, ex)) {
-    const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex, exId);
-    const bandOnly = ex.load === "band" && !isNumericLoad(ex, exId);
+    // ceilingMaxed: resistance is genuinely maxed (band tension, or S.profile.maxLoad) — see
+    // effectiveHi()'s comment. "Push load"/"use a firmer band" isn't actionable there; the rep
+    // ceiling itself is already the (automatically) moving target.
+    const ceilingMaxed = ex.load !== "time" && ex.load !== "cardio" && isResistanceMaxed(ex, exId);
+    const hasNumericLoad = (ex.load === "weight" || isNumericLoad(ex, exId)) && !ceilingMaxed;
+    const bandOnly = ex.load === "band" && !isNumericLoad(ex, exId) && !ceilingMaxed;
     // Same terminal-rung fix as prescribe() — "move up" is impossible on the last rung.
     const atLastRung = ex.ladder && assignedRung(exId) >= ex.ladder.length - 1;
-    const text = (ex.ladder && !atLastRung) ? "Cruising: move up to a harder variation" : hasNumericLoad ? "Cruising: push load" : bandOnly ? "Cruising: use a firmer band" : "Cruising";
+    const text = (ex.ladder && !atLastRung) ? "Cruising: move up to a harder variation" : hasNumericLoad ? "Cruising: push load" : bandOnly ? "Cruising: use a firmer band" : ceilingMaxed ? "Cruising: rep target rising (maxed out)" : "Cruising";
     return { lvl: "good", text };
   }
   if (!last) return { lvl: "acc", text: "No history yet" };
@@ -953,18 +1014,20 @@ function suggest(exId) {
     if (top >= (ex.target.sec || 0)) return { lvl: "good", text: `${ex.target.sec}s reached: add time or variation` };
     return { lvl: "acc", text: `Target ${ex.target.sec}s` };
   }
+  const hi = effectiveHi(ex, exId);
   const topReps = Math.max(...sets.map((s) => +s.reps || 0));
-  const allHit = sets.length >= (ex.target.sets || 1) && sets.every((s) => (+s.reps || 0) >= ex.target.hi);
+  const allHit = sets.length >= (ex.target.sets || 1) && sets.every((s) => (+s.reps || 0) >= hi);
   // Same last-set-is-meant-to-be-near-failure reasoning as prescribe()/advanceLadders — only
   // the earlier sets need to have stayed comfortable.
   const lowRpe = sets.slice(0, -1).every((s) => !s.rpe || s.rpe <= 8);
   if (allHit && lowRpe) {
     // A laddered bodyweight exercise never has a numeric load to add — only bands/weights do,
     // and a plain (non-dumbbell-mode) band has tension to firm up, not a numeric load.
-    const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex, exId);
-    const bandOnly = ex.load === "band" && !isNumericLoad(ex, exId);
+    const ceilingMaxed = isResistanceMaxed(ex, exId);
+    const hasNumericLoad = (ex.load === "weight" || isNumericLoad(ex, exId)) && !ceilingMaxed;
+    const bandOnly = ex.load === "band" && !isNumericLoad(ex, exId) && !ceilingMaxed;
     const atLastRung = ex.ladder && assignedRung(exId) >= ex.ladder.length - 1;
-    const text = (ex.ladder && !atLastRung) ? "Top of range: move up to a harder variation" : hasNumericLoad ? "Top of range: +load or +1 rep/set" : bandOnly ? "Top of range: firmer band or +1 rep/set" : "Top of range: +1 rep or +1 set";
+    const text = (ex.ladder && !atLastRung) ? "Top of range: move up to a harder variation" : hasNumericLoad ? "Top of range: +load or +1 rep/set" : bandOnly ? "Top of range: firmer band or +1 rep/set" : ceilingMaxed ? "Top of range: maxed out — rep target rising" : "Top of range: +1 rep or +1 set";
     return { lvl: "good", text };
   }
   if (topReps < ex.target.lo) return { lvl: "warn", text: `Below ${ex.target.lo} reps: hold or regress` };
@@ -1637,17 +1700,20 @@ function renderRunner() {
       // cat_cow — since the other mobility exercises are load:"time" and hit the branch above.)
       tgt = `${p.reps} — controlled, full range`;
     } else {
-      // "+load" only makes sense when a numeric load exists to add to — a laddered bodyweight
-      // exercise (push-ups, pull-ups, squats) clears its range into a harder ladder rung. A
-      // bodyweight exercise with no ladder either (prone row, bird dog) has no load or rung to
-      // step to — no fabricated "add tempo or pause reps" suffix, since neither is a tracked
-      // feature; the rep-range reset-and-reclimb (computed above) is the real, automatic lever.
-      // A plain band (not dumbbell mode) has tension, not a numeric load, to add.
-      const hasNumericLoad = ex.load === "weight" || isNumericLoad(ex, exId);
-      const bandOnly = ex.load === "band" && !isNumericLoad(ex, exId);
+      // "+load" only makes sense when a numeric load exists to add to AND there's still room —
+      // a laddered bodyweight exercise (push-ups, pull-ups, squats) clears its range into a
+      // harder ladder rung. A bodyweight exercise with no ladder either (prone row, bird dog)
+      // has no load or rung to step to — no fabricated "add tempo or pause reps" suffix, since
+      // neither is a tracked feature; the rep-range reset-and-reclimb (computed above) is the
+      // real, automatic lever. A plain band (not dumbbell mode) has tension, not a numeric load,
+      // to add. Once resistance is genuinely maxed (band tension, or S.profile.maxLoad) that
+      // same automatic lever takes back over — see effectiveHi()'s comment.
+      const ceilingMaxed = !ex.ladder && ex.load !== "time" && ex.load !== "cardio" && ex.cat !== "prehab" && isResistanceMaxed(ex, exId);
+      const hasNumericLoad = (ex.load === "weight" || isNumericLoad(ex, exId)) && !ceilingMaxed;
+      const bandOnly = ex.load === "band" && !isNumericLoad(ex, exId) && !ceilingMaxed;
       // Same terminal-rung fix as prescribe()/suggest() — no "next rung" exists at the last one.
       const atLastRung = ex.ladder && rung >= ex.ladder.length - 1;
-      const addLoadText = p.addLoad ? ((ex.ladder && !atLastRung) ? " · clears to next rung" : hasNumericLoad ? " +load" : bandOnly ? " · use a firmer band" : "") : "";
+      const addLoadText = p.addLoad ? ((ex.ladder && !atLastRung) ? " · clears to next rung" : hasNumericLoad ? " +load" : bandOnly ? " · use a firmer band" : ceilingMaxed ? " · maxed out, rep target raised" : "") : "";
       tgt = `${p.reps}${p.loadStepped ? ` · stepped to ${p.load}lb (was ${p.prevLoad})` : addLoadText}`;
       // Effort guidance on real strength work — the number alone doesn't say how hard to push it,
       // and evidence points to proximity-to-failure mattering more than the exact rep count.
@@ -2059,10 +2125,36 @@ function advanceLadders(entries) {
   });
   return leveled;
 }
+// Reps-based equivalent of advanceLadders() for exercises that have run out of RESISTANCE to
+// add — a band with no more tension, or a numeric load already at the equipment ceiling the
+// user told us they own (S.profile.maxLoad). Without this, clearing the printed rep range on a
+// maxed-out exercise just reset reps to the bottom of that SAME range at the SAME resistance,
+// forever — "use a firmer band"/"add load" isn't actionable once there's genuinely nothing
+// heavier to grab. Extends S.repCeilings[exId] instead, so the rep target itself keeps climbing —
+// automatic, no purchase or manual tracking required (matches the standing rule against
+// suggesting untracked modalities like tempo/pauses).
+function advanceRepCeilings(entries) {
+  const raised = [];
+  entries.forEach((e) => {
+    const ex = EXERCISES[e.exId];
+    if (!ex || ex.ladder || ex.load === "time" || ex.load === "cardio" || !ex.target || ex.target.hi == null) return;
+    if (!isResistanceMaxed(ex, e.exId)) return; // not maxed — normal load-stepping (or plain reps) still applies
+    const hi = effectiveHi(ex, e.exId);
+    const top = Math.max(0, ...e.sets.map((s) => +s.reps || 0));
+    const clearedRpe = e.sets.slice(0, -1).every((s) => !s.rpe || s.rpe <= 8);
+    if (top >= hi && clearedRpe) {
+      S.repCeilings = S.repCeilings || {};
+      S.repCeilings[e.exId] = hi + 3;
+      raised.push(ex.name);
+    }
+  });
+  return raised;
+}
 function finishRun() {
   const entries = collectRunEntries();
   if (!entries.length) { toast("Mark a set done (tap its number) so it saves"); return; }
   const leveled = advanceLadders(entries);
+  const raisedCeilings = advanceRepCeilings(entries);
   const date = RUN.date || today();
   // Today's session (and its "reasons" text — "never trained, prioritized" etc.) is generated
   // once and cached so it doesn't reshuffle on every re-render. But that cache is a snapshot of
@@ -2080,7 +2172,7 @@ function finishRun() {
     stopRest();
     RUN = null;
     saveRun();
-    toast(leveled.length ? `Leveled up → ${leveled[0]}` : `${title} logged`);
+    toast(leveled.length ? `Leveled up → ${leveled[0]}` : raisedCeilings.length ? `Maxed out — new rep target for ${raisedCeilings[0]}` : `${title} logged`);
     setTab("today");
     return;
   }
@@ -2091,7 +2183,7 @@ function finishRun() {
   stopRest();
   RUN = null;
   saveRun();
-  toast(leveled.length ? `Leveled up → ${leveled[0]}` : "Workout saved");
+  toast(leveled.length ? `Leveled up → ${leveled[0]}` : raisedCeilings.length ? `Maxed out — new rep target for ${raisedCeilings[0]}` : "Workout saved");
   setTab("today");
 }
 
@@ -2660,8 +2752,9 @@ function renderMore() {
       <div class="tiny muted">Pull-up bar and rower are assumed. No bands yet? Use bodyweight mode — it swaps every band move to a bodyweight/backpack version. Toggle gear as it arrives.</div>
       <button class="btn ${isBodyweightMode() ? "" : "ghost"}" id="bw-mode" style="margin-top:12px">${isBodyweightMode() ? "Bodyweight mode ON — restore band program" : "No bands/dumbbells yet → bodyweight mode"}</button>
       <div class="flags" id="equip-flags" style="margin-top:12px">
-        ${[["dumbbells", "Dumbbells"], ["suspension", "Suspension trainer"]].map(([k, l]) => `<button data-equip="${k}" class="flagbtn ${S.equipment[k] ? "on" : ""}">${l}</button>`).join("")}
+        ${[["dumbbells", "Dumbbells"], ["suspension", "Suspension trainer"], ["bandsMaxed", "Bands maxed out"]].map(([k, l]) => `<button data-equip="${k}" class="flagbtn ${S.equipment[k] ? "on" : ""}">${l}</button>`).join("")}
       </div>
+      <div class="tiny muted" style="margin-top:8px">"Bands maxed out" = you've genuinely run out of firmer bands to grab. Turns off "use a firmer band" suggestions on band-only exercises and raises the rep target instead, automatically.</div>
       ${Object.keys(S.swaps || {}).length ? `<button class="btn ghost" id="reset-swaps" style="margin-top:12px">Reset all ${Object.keys(S.swaps).length} swap(s)</button>` : ""}
     </div>
     <div class="blk-title"><span class="dot"></span>Profile</div>
@@ -2673,8 +2766,10 @@ function renderMore() {
         <label class="fld"><span class="lt">Sessions / week</span><input id="p-wk" inputmode="numeric" value="${esc(S.profile.weeklyTarget)}"/></label>
         <label class="fld"><span class="lt">Walk target (min)</span><input id="p-walk" inputmode="numeric" value="${esc(S.profile.walkTarget)}"/></label>
         <label class="fld"><span class="lt">Dumbbell step (lb)</span><input id="p-step" inputmode="decimal" value="${esc(S.profile.dumbbellStep)}"/></label>
+        <label class="fld"><span class="lt">Max load owned (lb)</span><input id="p-maxload" inputmode="decimal" placeholder="e.g. 50" value="${esc(S.profile.maxLoad ?? "")}"/></label>
       </div>
       <div class="tiny muted" style="margin-top:8px">Dumbbell step = the smallest jump your dumbbells allow. Once weights hit top of their rep range at RPE≤8, the app auto-steps the load by this much next time.</div>
+      <div class="tiny muted" style="margin-top:4px">Max load = your heaviest dumbbell (or a band's rated-equivalent max). Once a numeric-load exercise reaches it, the app stops suggesting "add load" — there's nothing heavier to grab — and raises the rep target instead. Leave blank if you're not sure yet.</div>
       <button class="btn" id="p-save" style="margin-top:12px">Save profile</button>
     </div>
     <div class="card tight center tiny muted">
@@ -2720,6 +2815,8 @@ function renderMore() {
     S.profile.weeklyTarget = Number(document.getElementById("p-wk").value) || S.profile.weeklyTarget;
     S.profile.walkTarget = Number(document.getElementById("p-walk").value) || S.profile.walkTarget;
     S.profile.dumbbellStep = Number(document.getElementById("p-step").value) || S.profile.dumbbellStep;
+    const maxLoadVal = document.getElementById("p-maxload").value.trim();
+    S.profile.maxLoad = maxLoadVal === "" ? null : (Number(maxLoadVal) || S.profile.maxLoad);
     S._m = Date.now();
     save(); toast("Profile saved");
   };

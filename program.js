@@ -113,6 +113,17 @@ const EXERCISES = {
     cue: "Retract the shoulder blades and lead with the elbows. The more horizontal your body, the harder it gets. Control the descent.",
     q: "bodyweight inverted row under table no equipment"
   },
+  towel_row: {
+    name: "Towel Row (pull-up bar)", cat: "pull", muscle: "back", load: "reps", target: { sets: 3, lo: 8, hi: 15 },
+    // No table or door setup needed — just the pull-up bar the app already assumes everyone has,
+    // plus a towel. The standard failure mode with a towel row is grip giving out long before the
+    // back does; looping the towel around the WRIST (not just holding it with fingers) moves the
+    // load-bearing point off your grip entirely, so a set ends when your back is actually done.
+    equip: ["Pull-up bar", "Towel"],
+    setup: "Drape a towel over the pull-up bar so both ends hang evenly. Loop each end once around a wrist — not just a finger grip — then hold on; the loop, not your hand, should be taking the load. Walk your feet out and lean back until your arms are straight, heels planted, body at an angle.",
+    cue: "Pull your chest toward the bar, elbows back, squeeze the shoulder blades together. More upright = easier; walk your feet further out (more horizontal) to make it harder. If your hands are still the limiter, wrap the towel around the wrist a second time.",
+    q: "towel row pull up bar exercise"
+  },
   band_row: {
     name: "Band Seated Row", cat: "pull", muscle: "back", load: "band", target: { sets: 3, lo: 12, hi: 15 },
     equip: ["Bands"],
@@ -524,10 +535,11 @@ const PAIN_AREAS = ["Winged scapula / L shoulder blade", "L shoulder (old disloc
 /* Swap alternatives — same muscle, different angle/equipment/load.
  * Used by the one-tap swap (e.g., a movement aggravates the shoulder). */
 const ALTS = {
-  pullup_prog: ["chinup_prog", "door_row", "band_row"],
-  trx_row: ["door_row", "band_row"],
-  door_row: ["band_row", "trx_row"],
-  band_row: ["door_row", "trx_row"],
+  pullup_prog: ["chinup_prog", "towel_row", "door_row", "band_row"],
+  trx_row: ["towel_row", "door_row", "band_row"],
+  door_row: ["towel_row", "band_row", "trx_row"],
+  towel_row: ["door_row", "band_row", "trx_row"],
+  band_row: ["towel_row", "door_row", "trx_row"],
   lateral_raise: ["band_upright_row", "prone_ytw"],
   band_upright_row: ["lateral_raise", "prone_ytw"],
   band_press: ["pushup_prog", "band_fly", "deep_pushup"],
@@ -579,6 +591,10 @@ const BW_SWAPS = {
   hammer_curl: "backpack_curl",
   pallof: "bird_dog",
   rdl: "sl_rdl",
-  band_row: "door_row",
-  trx_row: "door_row",
+  // Pull-up bar is assumed baseline equipment throughout this app (see the Equipment card copy
+  // in More) — towel_row only needs that plus a towel, vs. door_row's sturdy-table-or-specific-
+  // door requirement, which not everyone actually has even in bodyweight mode. towel_row is the
+  // more reliably-available default; door_row stays one tap away via the swap panel.
+  band_row: "towel_row",
+  trx_row: "towel_row",
 };
