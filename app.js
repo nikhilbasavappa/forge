@@ -321,6 +321,22 @@ function assignedVariation(exId) {
   const ex = EXERCISES[exId];
   return ex && ex.ladder ? ex.ladder[assignedRung(exId)] : null;
 }
+// Same rationale as ladderCue/ladderSetup/ladderEquip: some ladders share ONE {sets,lo,hi} across
+// rungs that are genuinely different movements — a low-effort activation drill (a scapular pull)
+// and a near-maximal one (a slow negative) don't belong to the same rep range any more than they
+// share a cue. Sharing one meant a "Scapular pull" rung was artificially capped at the SAME
+// ceiling (8 reps) as a full chin-up, and per-set progression naturally produces very different
+// numbers position to position within that cramped range — visible as something like "8, 8, 3, 3"
+// with no explanation. ladderTarget (parallel array, same order as ladder) gives the CURRENTLY
+// ASSIGNED rung its own {sets, lo, hi} when present; falls back to the exercise-level target
+// otherwise (every ladder that genuinely is one movement at different leverage needs nothing here).
+function rungTarget(ex, exId) {
+  if (ex.ladder && ex.ladderTarget) {
+    const t = ex.ladderTarget[assignedRung(exId)];
+    if (t) return t;
+  }
+  return ex.target;
+}
 // A rung is timed either because the whole exercise is (ex.load === "time" — e.g. every rung
 // of the standalone dead_hang routine, even ones whose text doesn't literally say "(time)" or
 // "dead hang", like "Active scapular hang") or because a normally rep-based ladder has ONE
@@ -392,9 +408,10 @@ function isResistanceMaxed(ex, exId) {
 // clears it) takes over — 0/absent the first time this fires, so it still returns the plain
 // printed hi until advanceRepCeilings() has actually raised it after that session.
 function effectiveHi(ex, exId) {
-  if (!ex.target || ex.target.hi == null) return ex.target ? ex.target.hi : undefined;
-  if (!isResistanceMaxed(ex, exId)) return ex.target.hi;
-  return Math.max(ex.target.hi, (S.repCeilings && S.repCeilings[exId]) || 0);
+  const target = rungTarget(ex, exId);
+  if (!target || target.hi == null) return target ? target.hi : undefined;
+  if (!isResistanceMaxed(ex, exId)) return target.hi;
+  return Math.max(target.hi, (S.repCeilings && S.repCeilings[exId]) || 0);
 }
 
 /* ---------- smart engine: readiness, momentum, stalls, cadence ---------- */
@@ -498,18 +515,29 @@ const MUSCLE_POOLS = (() => {
 // movements worth keeping in rotation regardless of equipment. backpack_curl is the one
 // exception — it's not a distinct movement, it's the same curl as hammer_curl with a backpack
 // standing in for a dumbbell, so it only earns a slot when there's genuinely no alternative.
-const EQUIP_SUBSTITUTE_ONLY = new Set(["backpack_curl"]);
+// door_row needs a sturdy table (or a specific latched-door setup) — not everyone has one even
+// outside bodyweight mode, and towel_row (pull-up bar + a towel — equipment already assumed for
+// everyone) covers the same movement pattern more reliably. Same treatment as backpack_curl:
+// stays out of normal rotation while a better-fitting option exists, but is never fully removed
+// — still reachable through the swap panel for anyone who does have a table and prefers it.
+const EQUIP_SUBSTITUTE_ONLY = new Set(["backpack_curl", "door_row"]);
 function equipFilteredPool(pool) {
+  // trx_row needs owning an actual suspension trainer. Unlike bands/dumbbells (assumed present,
+  // toggled OFF if missing), a suspension trainer is uncommon enough that it should be assumed
+  // ABSENT until turned on — S.equipment.suspension (More → Equipment) existed already but had
+  // never actually been wired to anything, so toggling it had zero effect on which exercises
+  // could be selected; trx_row kept showing up as an option regardless.
+  let out = (S.equipment && S.equipment.suspension) ? pool : pool.filter((id) => id !== "trx_row");
   if (isBodyweightMode()) {
     // band_pull_apart and face_pull now both fall back to the same bodyweight substitute
     // (prone_ytw — the only genuinely floor-only rear-delt option; see BW_SWAPS). Without
     // deduping by the RESOLVED id, a muscle that earns 2 priority slots could pick both raw
     // ids and end up with the identical exercise listed twice in the same session.
     const seen = new Set();
-    return pool.filter((id) => { const r = resolveEx(id); if (seen.has(r)) return false; seen.add(r); return true; });
+    return out.filter((id) => { const r = resolveEx(id); if (seen.has(r)) return false; seen.add(r); return true; });
   }
-  const filtered = pool.filter((id) => !EQUIP_SUBSTITUTE_ONLY.has(id));
-  return filtered.length ? filtered : pool;
+  const filtered = out.filter((id) => !EQUIP_SUBSTITUTE_ONLY.has(id));
+  return filtered.length ? filtered : out;
 }
 function daysSinceExercise(exId) {
   const l = lastEntry(exId);
@@ -759,12 +787,18 @@ function cardioTarget(exId, ex, setIndex, setsCount, sec, phase) {
 // single extra set isn't always enough once readiness has already cut the starting count down.
 // Capped so a low-rep-ceiling movement (e.g. an early pull-up rung) can't balloon into 8+ sets.
 // Skipped for time/cardio work, which isn't measured in reps.
-function applyVolumeFloor(setsCount, perSet, ex) {
+function applyVolumeFloor(setsCount, perSet, ex, exId) {
   // Excludes prehab specifically (corrective, not a muscle-building movement by design — a
   // 1-set thoracic rotation shouldn't triple into 3 sets chasing an arbitrary rep total).
   // Core stays IN scope even without a muscle tag: it's a real training priority, not
   // corrective filler, and deserves the same volume guarantee as tagged strength work.
-  if (ex.cat === "prehab" || ex.load === "time" || ex.load === "cardio" || !perSet.length) return { setsCount, perSet };
+  // A ladder rung with its OWN ladderTarget is also excluded — that {sets,lo,hi} was written
+  // deliberately for that specific movement (e.g. a scapular pull's 2×10-15 activation work, or a
+  // slow negative's 3×3-5 near-maximal reps), not the exercise's general-purpose default range,
+  // so padding it toward an unrelated 20-rep total would undo the point of giving it its own
+  // numbers in the first place — it already IS the complete prescription.
+  const hasOwnRungTarget = exId && ex.ladder && ex.ladderTarget && ex.ladderTarget[assignedRung(exId)];
+  if (ex.cat === "prehab" || ex.load === "time" || ex.load === "cardio" || hasOwnRungTarget || !perSet.length) return { setsCount, perSet };
   const out = [...perSet];
   let sets = setsCount, total = out.reduce((s, p) => s + (+p.reps || 0), 0), added = 0;
   while (total < 20 && added < 3) {
@@ -776,6 +810,12 @@ function applyVolumeFloor(setsCount, perSet, ex) {
 // Auto-progression: per-set targets scaled by readiness (both directions) + momentum.
 function prescribe(exId) {
   const ex = EXERCISES[exId];
+  // See rungTarget()'s comment — some ladders give their currently-assigned rung its own
+  // {sets,lo,hi} instead of sharing the exercise-level one. Every ex.target.X below this point
+  // (except the cardio branch, which is never laddered) reads through `target` instead, so a
+  // rung with its own numbers actually uses them rather than always falling back to the
+  // exercise's default range regardless of which movement is currently assigned.
+  const target = rungTarget(ex, exId);
   if (ex.load === "cardio") {
     // Alternating protocols (row_intervals) are a sequence of DIFFERENT sets — some hard, some
     // easy — each with its own duration, not N identical sets sharing one duration. phase carries
@@ -806,8 +846,8 @@ function prescribe(exId) {
   // neutral text slapped on top. None of that machinery runs here now — sets are always the
   // exercise's own count (deload still trims them), reps are always the midpoint of its range.
   if (ex.cat === "prehab" || (ex.cat === "mobility" && ex.load !== "time")) {
-    const setsCount = deloadActive() ? Math.max(1, Math.ceil(ex.target.sets * 0.6)) : ex.target.sets;
-    const reps = Math.round((ex.target.lo + ex.target.hi) / 2);
+    const setsCount = deloadActive() ? Math.max(1, Math.ceil(target.sets * 0.6)) : target.sets;
+    const reps = Math.round((target.lo + target.hi) / 2);
     return {
       setsCount,
       perSet: Array.from({ length: setsCount }, () => ({ reps, load: null })),
@@ -830,7 +870,7 @@ function prescribe(exId) {
   // advanceLadders and only needs ONE clean hold to fire — this doesn't need to hunt a new max
   // every set, so it gets a flat, modest, un-inflated target instead.
   if (ex.ladder && isTimedVariation(ex.ladder[assignedRung(exId)], ex) && ex.load !== "time") {
-    const setsCount = deload ? Math.max(1, Math.ceil(ex.target.sets * 0.6)) : ex.target.sets;
+    const setsCount = deload ? Math.max(1, Math.ceil(target.sets * 0.6)) : target.sets;
     const lastSets = last ? last.entry.sets.filter((s) => s.reps != null) : [];
     const bestLast = lastSets.length ? Math.max(...lastSets.map((s) => +s.reps || 0)) : null;
     return {
@@ -845,16 +885,16 @@ function prescribe(exId) {
   // progression (below) already catches and responds to next session. A "moderate" day is a
   // normal day, not an impaired one, so it no longer touches volume at all; "low" (usually
   // driven by real pain flags or bad sleep, not just feeling tired) trims one set, not ~40%.
-  let setsCount = ex.target.sets;
-  if (deload) setsCount = Math.max(1, Math.ceil(ex.target.sets * 0.6));
-  else if (rd && rd.band === "low") setsCount = Math.max(1, ex.target.sets - 1);
-  else if (rd && rd.band === "primed" && mo && ex.load !== "time") setsCount = ex.target.sets + 1;
+  let setsCount = target.sets;
+  if (deload) setsCount = Math.max(1, Math.ceil(target.sets * 0.6));
+  else if (rd && rd.band === "low") setsCount = Math.max(1, target.sets - 1);
+  else if (rd && rd.band === "primed" && mo && ex.load !== "time") setsCount = target.sets + 1;
 
   if (!last) {
     // Seed at the MIDPOINT of the rep range, not the bottom — the bottom is the easiest
     // possible number in the range, not a real calibration attempt. Still self-corrects:
     // clear it clean and next time's target moves toward the top.
-    const base = ex.load === "time" ? ex.target.sec : Math.round((ex.target.lo + ex.target.hi) / 2);
+    const base = ex.load === "time" ? target.sec : Math.round((target.lo + target.hi) / 2);
     // A plain band (no dumbbell mode) has adjustable TENSION, not a "weight" to find — telling
     // someone to "find a clean working weight" for a resistance band doesn't match what they're
     // actually holding. isNumericLoad(ex, exId) is checked BEFORE the plain ex.load === "reps"
@@ -867,7 +907,7 @@ function prescribe(exId) {
       : (ex.load === "reps" || !ex.load) ? "Baseline — see how many clean reps you can do"
       : "Baseline — find a band you feel by the last few reps";
     let baseSets = setsCount, basePerSet = Array.from({ length: setsCount }, () => ({ reps: base, last: null, load: null }));
-    ({ setsCount: baseSets, perSet: basePerSet } = applyVolumeFloor(baseSets, basePerSet, ex));
+    ({ setsCount: baseSets, perSet: basePerSet } = applyVolumeFloor(baseSets, basePerSet, ex, exId));
     return { setsCount: baseSets, perSet: basePerSet, note: baseNote };
   }
   const lastSets = last.entry.sets.filter((s) => s.reps != null || s.load != null);
@@ -885,10 +925,10 @@ function prescribe(exId) {
     const ls = lastSets[i] || lastSets[lastSets.length - 1] || {};
     const lastReps = ls.reps != null ? +ls.reps : null;
     if (ex.load === "time") {
-      const t = lastReps || ex.target.sec;
-      perSet.push({ reps: t >= ex.target.sec ? t + 10 : ex.target.sec, last: lastReps, load: ls.load ?? null });
+      const t = lastReps || target.sec;
+      perSet.push({ reps: t >= target.sec ? t + 10 : target.sec, last: lastReps, load: ls.load ?? null });
     } else {
-      const r = lastReps || ex.target.lo;
+      const r = lastReps || target.lo;
       // The last set of an exercise is intentionally pushed close to failure now (see the
       // per-set target guidance in the runner) — clearing the range ON that set is a stronger
       // signal to progress, not a weaker one, so only earlier sets get the RPE<=8 gate.
@@ -901,7 +941,7 @@ function prescribe(exId) {
       const lastLoadNum = numericLoad && ls.load != null && ls.load !== "" && isFinite(+ls.load) ? +ls.load : null;
       let nextLoad = ls.load ?? null, loadStepped = false;
       if (hitTop && numericLoad && lastLoadNum != null && !ceilingMaxed) { nextLoad = lastLoadNum + step; loadStepped = true; steppedTo = nextLoad; }
-      perSet.push({ reps: hitTop ? ex.target.lo : Math.min(hi, r + 1), last: lastReps, load: nextLoad, addLoad: hitTop, loadStepped, prevLoad: lastLoadNum });
+      perSet.push({ reps: hitTop ? target.lo : Math.min(hi, r + 1), last: lastReps, load: nextLoad, addLoad: hitTop, loadStepped, prevLoad: lastLoadNum });
     }
   }
   if (deload) {
@@ -930,7 +970,7 @@ function prescribe(exId) {
   else if (anyAdd) note = steppedTo != null ? `Cleared the range — stepped up to ${steppedTo}lb` : ceilingMaxed ? "Cleared the range — maxed out, rep target raised" : (harderText ? `Cleared the range — ${harderText}` : "Cleared the range");
   else note = ex.load === "time" ? "Beat last time's hold" : "Beat last time's reps";
   let finalSets = setsCount, finalPerSet = perSet;
-  ({ setsCount: finalSets, perSet: finalPerSet } = applyVolumeFloor(finalSets, finalPerSet, ex));
+  ({ setsCount: finalSets, perSet: finalPerSet } = applyVolumeFloor(finalSets, finalPerSet, ex, exId));
   return { setsCount: finalSets, perSet: finalPerSet, note };
 }
 
@@ -1014,9 +1054,10 @@ function suggest(exId) {
     if (top >= (ex.target.sec || 0)) return { lvl: "good", text: `${ex.target.sec}s reached: add time or variation` };
     return { lvl: "acc", text: `Target ${ex.target.sec}s` };
   }
+  const target = rungTarget(ex, exId);
   const hi = effectiveHi(ex, exId);
   const topReps = Math.max(...sets.map((s) => +s.reps || 0));
-  const allHit = sets.length >= (ex.target.sets || 1) && sets.every((s) => (+s.reps || 0) >= hi);
+  const allHit = sets.length >= (target.sets || 1) && sets.every((s) => (+s.reps || 0) >= hi);
   // Same last-set-is-meant-to-be-near-failure reasoning as prescribe()/advanceLadders — only
   // the earlier sets need to have stayed comfortable.
   const lowRpe = sets.slice(0, -1).every((s) => !s.rpe || s.rpe <= 8);
@@ -1030,8 +1071,8 @@ function suggest(exId) {
     const text = (ex.ladder && !atLastRung) ? "Top of range: move up to a harder variation" : hasNumericLoad ? "Top of range: +load or +1 rep/set" : bandOnly ? "Top of range: firmer band or +1 rep/set" : ceilingMaxed ? "Top of range: maxed out — rep target rising" : "Top of range: +1 rep or +1 set";
     return { lvl: "good", text };
   }
-  if (topReps < ex.target.lo) return { lvl: "warn", text: `Below ${ex.target.lo} reps: hold or regress` };
-  return { lvl: "acc", text: `Add reps toward ${ex.target.hi}` };
+  if (topReps < target.lo) return { lvl: "warn", text: `Below ${target.lo} reps: hold or regress` };
+  return { lvl: "acc", text: `Add reps toward ${target.hi}` };
 }
 
 /* ---------- toast ---------- */
@@ -1312,7 +1353,11 @@ function setTab(tab) {
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
 
 /* ---------- target label ---------- */
-function targetLabel(ex) {
+// exId is optional — when passed and the exercise has a ladderTarget for the currently assigned
+// rung, the pill reflects THAT rung's own {sets,lo,hi} instead of always the exercise-level
+// default. Without this the summary pill ("3×3-8") and the actual per-set rows below it
+// (rung-aware since prescribe() is) would show two different, contradictory ranges.
+function targetLabel(ex, exId) {
   if (ex.load === "cardio") {
     if (ex.intervalPattern) {
       const rounds = ex.intervalPattern.length / 2;
@@ -1321,8 +1366,17 @@ function targetLabel(ex) {
     }
     return `${fmtDur(ex.target.sec)} · strokes`;
   }
-  if (ex.load === "time") return `${ex.target.sets}×${fmtDur(ex.target.sec)}`;
-  return `${ex.target.sets}×${ex.target.lo}–${ex.target.hi}${ex.side ? "/side" : ""}`;
+  const target = exId ? rungTarget(ex, exId) : ex.target;
+  if (ex.load === "time") return `${target.sets}×${fmtDur(target.sec)}`;
+  // A ladder's timed rung (chinup_prog/pullup_prog's "Dead hang") has ex.load === "reps" at the
+  // exercise level — only the CURRENTLY ASSIGNED rung is timed — so ex.load alone can't catch it
+  // the way it does for a genuinely time-typed exercise (plank, dead_hang standalone). Without
+  // this, the pill showed a rep range ("3×3-8") for what's actually a hold. There's also no
+  // stored duration to format here — prescribe() hardcodes a flat 30s target for every ladder
+  // dead-hang rung rather than reading one from data (see its comment) — so this just says
+  // "hold", matching exactly what the runner's own pill already shows for the same rung.
+  if (exId && ex.ladder && isTimedVariation(assignedVariation(exId), ex)) return `${target.sets}× hold`;
+  return `${target.sets}×${target.lo}–${target.hi}${ex.side ? "/side" : ""}`;
 }
 function demoLink(ex) {
   if (!ex.q) return "";
@@ -1542,7 +1596,7 @@ function renderToday() {
       const last = lastLabel(exId);
       const swapped = exId !== rawId ? `<span class="pill">swapped</span>` : "";
       html += `<div class="ex">
-        <div class="row"><div class="name tappable" data-exhist="${exId}">${esc(ex.name)} ›</div><span class="pill">${targetLabel(ex)}</span></div>
+        <div class="row"><div class="name tappable" data-exhist="${exId}">${esc(ex.name)} ›</div><span class="pill">${targetLabel(ex, exId)}</span></div>
         ${cueBlock(ex, exId)}
         <div class="meta">${!sg.text || sg.text === "No history yet" ? "" : `<span class="pill ${sg.lvl}">${esc(sg.text)}</span>`}${swapped}${demoLink(ex)}</div>
         ${last ? `<div class="lastnote">${esc(last)}</div>` : ""}
@@ -1760,7 +1814,7 @@ function renderRunner() {
     <div class="runbar"><div class="runbar-fill" style="width:${pct}%"></div></div>
     ${RUN.date ? `<div class="banner">Backdating this session to ${esc(prettyDate(RUN.date))}. Enter what you actually did, or leave blank to log the target.</div>` : ""}
     <div class="card">
-      <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${timed ? `${pres.setsCount}× hold` : targetLabel(ex)}</span></div>
+      <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${timed ? `${pres.setsCount}× hold` : targetLabel(ex, exId)}</span></div>
       ${ex.ladder ? `<div class="tiny muted" style="margin:-2px 0 4px">Variation: ${esc(displayName)}${timed ? " · timed hold" : ""}</div>` : ""}
       ${ex.ladder && timed ? `<div class="cue">Hold with good form as long as you can — no reps. Tap ‘time it’ to run the clock.</div>` : cueBlock(ex, exId)}
       ${equipLine(ex, exId)}${setupLine(ex, exId)}
@@ -1881,7 +1935,10 @@ function swapAltList(exId, reason) {
   const res = document.getElementById("swap-result");
   let alts = ((typeof ALTS !== "undefined" && ALTS[exId]) || []).slice();
   if (reason === "equip") {
-    const gearFree = (id) => !equipList(EXERCISES[id]).some((e) => /band|dumbbell|suspension/i.test(e));
+    // "table" added — door_row's ["Sturdy table"] didn't match this regex, so a swap panel
+    // triggered by "I don't have the equipment" was ranking it as if it were gear-free, same
+    // tier as towel_row (which genuinely only needs the pull-up bar the app already assumes).
+    const gearFree = (id) => !equipList(EXERCISES[id]).some((e) => /band|dumbbell|suspension|table/i.test(e));
     alts.sort((a, b) => (gearFree(b) ? 1 : 0) - (gearFree(a) ? 1 : 0));
   }
   if (!alts.length) { res.innerHTML = `<div class="tiny muted" style="margin-top:8px">No same-pattern alternative for this one. Try adjusting the difficulty, or skip it.</div>`; return; }
@@ -1927,7 +1984,7 @@ function renderExercise(exId) {
   VIEW.innerHTML = `
     <button class="btn ghost sm" id="ex-back" style="margin:8px 0 6px">← Back</button>
     <div class="card">
-      <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${targetLabel(ex)}</span></div>
+      <div class="row"><div class="name">${esc(ex.name)}</div><span class="pill">${targetLabel(ex, exId)}</span></div>
       <div class="cue">${esc(rungCue(ex, exId))}</div>
       <div class="meta">${demoLink(ex)}</div>
     </div>
@@ -2120,7 +2177,10 @@ function advanceLadders(entries) {
     // Same reasoning as prescribe()'s hitTop: the last set is meant to be pushed near failure,
     // so only the earlier sets need to have stayed comfortable for this to count as a clean clear.
     const clearedRpe = e.sets.slice(0, -1).every((s) => !s.rpe || s.rpe <= 8);
-    const advance = isTimedVariation(ex.ladder[r], ex) ? top >= 45 : (top >= ex.target.hi && clearedRpe);
+    // Advance threshold matches whatever was actually PRESCRIBED for this rung — a rung with its
+    // own ladderTarget (e.g. scapular pull's 2×10-15) should need to clear ITS ceiling to level
+    // up, not the exercise's unrelated default range.
+    const advance = isTimedVariation(ex.ladder[r], ex) ? top >= 45 : (top >= rungTarget(ex, e.exId).hi && clearedRpe);
     if (advance) { S.ladders[e.exId] = r + 1; leveled.push(ex.ladder[r + 1].replace(/\s*\(time\)/i, "")); }
   });
   return leveled;

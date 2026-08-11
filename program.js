@@ -95,6 +95,21 @@ const EXERCISES = {
       "Depress the shoulder blades before the arms move. Pull your chin over the bar, control the descent. Stop 1–2 reps short of failure.",
       "Same full pull-up technique, now loaded. Depress the shoulder blades before the arms move, chin over the bar, control the descent. Add weight in small jumps once you clear the top of your rep range.",
     ],
+    // The exercise-level target (3×3-8) is written for a genuine pull-up — a near-maximal
+    // strength set. Sharing it across every rung meant an easy shoulder-blade activation drill
+    // (Scapular pull) was capped at the SAME 8-rep ceiling as a real pull-up, and a slow negative
+    // (each rep already maximally fatiguing on its own) was expected to reach that same 8, which
+    // it never realistically will — the mismatch is what produced oddly lopsided-looking targets
+    // like "8, 8, 3, 3" once per-set progression and the volume floor interacted with a range that
+    // was never sized for that movement. null falls back to the exercise-level target above.
+    ladderTarget: [
+      null,                             // Dead hang — timed, uses its own fixed-hold branch, not this
+      { sets: 2, lo: 10, hi: 15 },      // Scapular pull — low-fatigue activation, higher reps
+      { sets: 3, lo: 3, hi: 5 },        // Negative — each rep is near-maximal, low reps by design
+      { sets: 3, lo: 5, hi: 10 },       // Band-assisted — moderate, between activation and a real pull-up
+      null,                             // Full pull-up — the range this was written for
+      null,                             // Weighted pull-up — same range, now loaded
+    ],
     cue: "Depress the shoulder blades before the arms. Control the descent. Stop 1–2 reps short of failure.",
     q: "pull up progression beginner"
   },
@@ -430,6 +445,17 @@ const EXERCISES = {
       "Use your legs to take some of the load on the way up. Push less with your legs each session as you get stronger, until the pull is arms-and-back alone.",
       "Underhand grip loads the biceps hard plus the back. Lead the chest to the bar, control the lower. Stop 1–2 reps short of failure.",
       "Same full chin-up technique, now loaded. Lead the chest to the bar, control the lower. Add weight in small jumps once you clear the top of your rep range.",
+    ],
+    // Same rationale as pullup_prog's ladderTarget — see its comment. Chair-assisted (rung 3) is
+    // closer to a real chin-up than pullup_prog's band-assisted rung, so it gets a slightly
+    // higher ceiling; otherwise the same reasoning (activation vs. near-maximal vs. moderate).
+    ladderTarget: [
+      null,                             // Dead hang — timed, uses its own fixed-hold branch, not this
+      { sets: 2, lo: 10, hi: 15 },      // Scapular pull — low-fatigue activation, higher reps
+      { sets: 3, lo: 3, hi: 5 },        // Negative chin — each rep is near-maximal, low reps by design
+      { sets: 3, lo: 6, hi: 12 },       // Chair-assisted — moderate, legs still doing real work
+      null,                             // Full chin-up — the range this was written for
+      null,                             // Weighted chin-up — same range, now loaded
     ],
     cue: "Underhand grip (palms toward you) — loads the biceps hard plus the back. Lead the chest to the bar, control the lower. Your main biceps builder until you have load.",
     q: "chin up progression beginner"
