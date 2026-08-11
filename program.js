@@ -402,26 +402,25 @@ const EXERCISES = {
     q: "rowing machine technique pace"
   },
   row_intervals: {
-    name: "Rower — Intervals", cat: "cond", load: "cardio", target: { sets: 12 },
-    // 6 rounds of 30s hard / 60s easy, modeled as 12 SEPARATE alternating sets — not 6 sets that
+    name: "Rower — Intervals", cat: "cond", load: "cardio", target: { sets: 6 },
+    // 3 rounds of 30s hard / 60s easy, modeled as 6 SEPARATE alternating sets — not 3 sets that
     // each secretly bundle a hard AND an easy phase into one timer/target. The old bundled model
     // made "beat your stroke rate" ambiguous (one strokes field covering both a 30s hard push and
     // a 60s easy paddle can't mean anything), and it silently chained a 60s rest onto EVERY one
-    // of the 6 rows on top of the 60s easy phase already being logged as its own thing — meaning
-    // a full round of hard+easy was really hard+easy+ANOTHER 60s, not the intended hard+easy.
-    // Each entry here is its own set: its own timer, its own single target, no auto-chained rest
+    // of the rows on top of the 60s easy phase already being logged as its own thing — meaning a
+    // full round of hard+easy was really hard+easy+ANOTHER 60s, not the intended hard+easy. An
+    // earlier pass here mistakenly carried the round count forward as 6 (12 total sets) instead
+    // of 3 (6 total) — reported directly: "It should be 6 sets total (3 easy, 3 hard)." Each
+    // entry below is its own set: its own timer, its own single target, no auto-chained rest
     // tacked on afterward — the easy set immediately following a hard one already IS the rest.
     intervalPattern: [
-      { sec: 30, phase: "hard" }, { sec: 60, phase: "easy" },
-      { sec: 30, phase: "hard" }, { sec: 60, phase: "easy" },
-      { sec: 30, phase: "hard" }, { sec: 60, phase: "easy" },
       { sec: 30, phase: "hard" }, { sec: 60, phase: "easy" },
       { sec: 30, phase: "hard" }, { sec: 60, phase: "easy" },
       { sec: 30, phase: "hard" }, { sec: 60, phase: "easy" },
     ],
     equip: ["Rower"],
     setup: "Strap your feet in, grip the handle.",
-    cue: "6 rounds of 30s HARD then 60s EASY — but each is its own separate set, not one combined set. Tap a hard set's timer and push the pace; log your strokes when it ends. Tap the easy set right after it and just paddle — nothing to log, it's pure recovery. Repeat.",
+    cue: "3 rounds of 30s HARD then 60s EASY — but each is its own separate set, not one combined set. Tap a hard set's timer and push the pace; log your strokes when it ends. Tap the easy set right after it and just paddle — nothing to log, it's pure recovery. Repeat.",
     q: "rowing machine interval workout technique"
   },
 
