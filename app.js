@@ -792,13 +792,19 @@ function applyVolumeFloor(setsCount, perSet, ex, exId) {
   // 1-set thoracic rotation shouldn't triple into 3 sets chasing an arbitrary rep total).
   // Core stays IN scope even without a muscle tag: it's a real training priority, not
   // corrective filler, and deserves the same volume guarantee as tagged strength work.
-  // A ladder rung with its OWN ladderTarget is also excluded — that {sets,lo,hi} was written
-  // deliberately for that specific movement (e.g. a scapular pull's 2×10-15 activation work, or a
-  // slow negative's 3×3-5 near-maximal reps), not the exercise's general-purpose default range,
-  // so padding it toward an unrelated 20-rep total would undo the point of giving it its own
-  // numbers in the first place — it already IS the complete prescription.
-  const hasOwnRungTarget = exId && ex.ladder && ex.ladderTarget && ex.ladderTarget[assignedRung(exId)];
-  if (ex.cat === "prehab" || ex.load === "time" || ex.load === "cardio" || hasOwnRungTarget || !perSet.length) return { setsCount, perSet };
+  // ANY laddered exercise is excluded, not just a rung with its own ladderTarget override. The
+  // "under 20 total reps isn't much of a stimulus" assumption this floor is built on is true for
+  // an easy isolation movement (a curl, a raise) but flatly wrong for a hard bodyweight compound
+  // (a pull-up, a chin-up, a push-up) — there, a low rep max (say, 8) already IS a near-maximal,
+  // real stimulus per set, not evidence of "too light." Before this exclusion, someone whose real
+  // chin-up max was 8 could clear 2 sets at their genuine limit and then get padded into a 3rd
+  // and 4th set chasing an arbitrary total they were never capable of doing twice, let alone
+  // four times — reported directly: "8 is basically my current max. There's no way I can do it
+  // twice and then two more sets." A rung with its own ladderTarget was already excluded (still
+  // is, redundantly) — this now covers the terminal Full/Weighted rungs too, and every OTHER
+  // laddered bodyweight movement (trx_row, diamond_pushup, hanging_knee, pushup_prog,
+  // goblet_squat) that had the identical exposure without anyone having reported it yet.
+  if (ex.cat === "prehab" || ex.load === "time" || ex.load === "cardio" || ex.ladder || !perSet.length) return { setsCount, perSet };
   const out = [...perSet];
   let sets = setsCount, total = out.reduce((s, p) => s + (+p.reps || 0), 0), added = 0;
   while (total < 20 && added < 3) {
