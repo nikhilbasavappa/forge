@@ -356,7 +356,17 @@ function isBodyweightMode() { return typeof BW_SWAPS !== "undefined" && S.swaps 
 // "pressdown" was a typo — the actual exercise is named "Pushdown" (Band Triceps Pushdown), so
 // it never matched and never converted to dumbbell mode even with the toggle on and equipDumbbell
 // fields defined. Kept both so a future rename either direction still matches.
-function dumbbellMode(ex) { return S.equipment && S.equipment.dumbbells && ex.load === "band" && !ex.noDumbbellMode && /curl|press|fly|row|squat|rdl|pressdown|pushdown|raise/i.test(ex.name + " " + (ex.cat || "")); }
+// alwaysDumbbell (band_curl, hammer_curl): a curl on a band loses tension exactly where the
+// exercise is hardest and gets easiest right when a real muscle would still be working — the
+// band's resistance curve is backwards for this movement, not just "worse without the general
+// toggle." Both exercises' own cue text already said as much ("bands run out of tension here" /
+// "dumbbells beat bands here"). Gating that behind the general S.equipment.dumbbells toggle meant
+// it only applied once someone remembered to flip an unrelated, exercise-agnostic switch — these
+// two are always better as dumbbells, independent of whatever that toggle happens to be set to.
+function dumbbellMode(ex) {
+  if (ex.alwaysDumbbell) return !ex.noDumbbellMode;
+  return S.equipment && S.equipment.dumbbells && ex.load === "band" && !ex.noDumbbellMode && /curl|press|fly|row|squat|rdl|pressdown|pushdown|raise/i.test(ex.name + " " + (ex.cat || ""));
+}
 // Numeric-load exercises are the ones the weight-progression engine can auto-step:
 // dumbbell-mode band moves once dumbbells are on, anything already tracked in lb (backpack
 // curl), OR a laddered bodyweight exercise that's reached its "Weighted" terminal rung

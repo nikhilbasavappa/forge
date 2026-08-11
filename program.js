@@ -255,6 +255,10 @@ const EXERCISES = {
     equip: ["Bands"],
     setup: "Stand on the middle of a band, a handle in each hand, palms forward, elbows pinned.",
     cue: "Elbows pinned, full range, squeeze hard at the top, slow descent. 8–15 reps near failure, add load over time. Builds the peak / long head. Use dumbbells once you have them — bands run out of tension here.",
+    // A curl loses band tension right at the top, where the bicep is still working hardest — the
+    // band's resistance curve fights the exercise. Always dumbbells once you own any, independent
+    // of the general "Dumbbells" equipment toggle (which also affects unrelated exercises).
+    alwaysDumbbell: true,
     equipDumbbell: ["Dumbbells"],
     setupDumbbell: "Hold a dumbbell in each hand, palms forward, elbows pinned.",
     cueDumbbell: "Elbows pinned, full range, squeeze hard at the top, slow descent. 8–15 reps near failure, add load over time. Builds the peak / long head.",
@@ -265,8 +269,8 @@ const EXERCISES = {
     equip: ["Bands or dumbbells"],
     setup: "Stand on a band (or hold a weight in each hand) with a neutral grip, thumbs up, elbows pinned.",
     cue: "Palms neutral (thumbs up), curl with control. Trains the brachialis under the biceps — adds thickness and pushes the peak up. Load it: dumbbells beat bands here.",
-    // Same gap as lateral_raise: no equipDumbbell fields despite the cue itself saying dumbbells
-    // are the better tool, so the equipment chip and setup text never actually switched over.
+    // Same reasoning as band_curl — always dumbbells, not gated behind the general toggle.
+    alwaysDumbbell: true,
     equipDumbbell: ["Dumbbells"],
     setupDumbbell: "Hold a dumbbell in each hand with a neutral grip (palms facing each other), elbows pinned.",
     cueDumbbell: "Palms neutral (thumbs up), curl with control. Trains the brachialis under the biceps — adds thickness and pushes the peak up.",
