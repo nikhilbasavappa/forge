@@ -565,6 +565,21 @@ function daysSinceMuscle(muscle) {
   scan(S.workouts); scan(S.activity);
   return best === Infinity ? 999 : best;
 }
+// How many SESSIONS (not sets/reps) this muscle has ever appeared in — used to break exact ties
+// in generateSession()'s due-ranking with something that actually remembers, instead of a coin
+// flip. Same-tier muscles (back/chest/biceps all target 2.5d; legs/triceps/side_delts all 3.5d)
+// routinely get trained in the SAME session, which resets their daysSinceMuscle to the identical
+// date and ties their due score exactly — Math.random() then decides who wins the double-slot
+// and title billing, repeatedly, with no memory of who won last time. A few unlucky coin flips
+// early on (or a run of them) can produce a real, persistent gap that never self-corrects, since
+// randomness has no way to know one muscle has been shortchanged — reported directly: chest
+// landing at 5 real sessions against back/biceps' 8 each, despite an identical target cadence.
+function muscleTrainCount(muscle) {
+  let n = 0;
+  const scan = (arr) => (arr || []).forEach((w) => { if ((w.entries || []).some((e) => { const ex = EXERCISES[e.exId]; return ex && ex.muscle === muscle; })) n++; });
+  scan(S.workouts); scan(S.activity);
+  return n;
+}
 // Reads a measurement field off a record, averaging L/R for the two-sided ones.
 function measurementValue(rec, field) {
   if (field === "armAvg") { const v = [rec.armL, rec.armR].filter((x) => x != null).map(Number); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; }
@@ -684,9 +699,13 @@ function generateSession() {
       let due = (daysSinceMuscle(m) / MUSCLE_TARGETS[m]) * (stalled ? 1.5 : 1);
       const recentCount = recentTop.filter((x) => x === m).length;
       if (recentCount > 0) due *= Math.pow(0.7, recentCount);
-      return { m, due, r: Math.random(), stalled };
+      return { m, due, trainCount: muscleTrainCount(m), r: Math.random(), stalled };
     })
-    .sort((a, b) => (b.due - a.due) || (b.r - a.r));
+    // Exact due ties (routine for same-tier muscles trained in the same session — see
+    // muscleTrainCount()'s comment) go to whoever's been trained FEWER times overall, not a coin
+    // flip — a real, remembered fairness tiebreak instead of one with no memory of past luck.
+    // Random is now only a last resort, for the rarer case trainCount also ties.
+    .sort((a, b) => (b.due - a.due) || (a.trainCount - b.trainCount) || (b.r - a.r));
 
   // Total exercise SLOTS, not muscle count. Readiness no longer touches this at all — it has
   // exactly one lever for volume (prescribe() trims sets-per-exercise on a genuinely low day),
