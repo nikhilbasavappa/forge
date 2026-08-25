@@ -654,6 +654,114 @@ function joinNice(arr) {
   if (arr.length === 2) return arr.join(" & ");
   return arr.slice(0, -1).join(", ") + " & " + arr[arr.length - 1];
 }
+/* ---------- backfill: approximate sessions for a real gap where nothing saved ---------- */
+// Same muscle-priority math as generateSession()'s ranking (due = days-since / target cadence,
+// same trainCount tiebreak — see muscleTrainCount()'s comment), but computed AS OF a past date
+// against a growing local list of workouts instead of real "today" and S.workouts directly, so
+// walking forward through a date range produces a realistic day-by-day rotation rather than the
+// same muscles every time.
+function backfillDaysSince(muscle, asOfDate, workouts) {
+  let best = Infinity;
+  const asOf = new Date(asOfDate.replace(/-/g, "/"));
+  workouts.forEach((w) => {
+    if (w.date >= asOfDate) return;
+    (w.entries || []).forEach((e) => {
+      const ex = EXERCISES[e.exId];
+      if (ex && ex.muscle === muscle) {
+        const d = Math.round((asOf - new Date(w.date.replace(/-/g, "/"))) / 86400000);
+        best = Math.min(best, d);
+      }
+    });
+  });
+  return best === Infinity ? 999 : best;
+}
+// The whole point of a backfilled entry is to restore accurate SCHEDULING (so the muscle
+// rotation and "days since trained" stop being wrong), not to fabricate a new PR — so reps
+// default to the last REAL number logged for that exercise before the gap started (searching
+// backward through actual history), never a guess dressed up as progress. Falls back to the
+// exercise's own target midpoint only when there's no real history for it at all.
+function backfillReps(exId, realHistory) {
+  const ex = EXERCISES[exId];
+  for (let i = realHistory.length - 1; i >= 0; i--) {
+    const e = (realHistory[i].entries || []).find((x) => x.exId === exId);
+    if (e && e.sets && e.sets.length) {
+      const top = Math.max(0, ...e.sets.map((s) => +s.reps || 0));
+      if (top) return top;
+    }
+  }
+  if (ex.load === "time") return 30;
+  const t = (ex.ladder ? rungTarget(ex, exId) : ex.target) || {};
+  return (t.lo != null && t.hi != null) ? Math.round((t.lo + t.hi) / 2) : 10;
+}
+// One approximate session for one date — same shape generateSession()/finishRun() produce, so
+// it displays and counts identically everywhere. Deliberately does NOT touch S.ladders or
+// S.repCeilings (see the caller) — a backfilled number should never look like a real clearance.
+function generateBackfillSession(dateStr, workoutsSoFar, realHistory) {
+  const candidates = Object.keys(MUSCLE_TARGETS);
+  const ranked = candidates.map((m) => {
+    const due = backfillDaysSince(m, dateStr, workoutsSoFar) / MUSCLE_TARGETS[m];
+    const trainCount = workoutsSoFar.filter((w) => (w.entries || []).some((e) => { const ex = EXERCISES[e.exId]; return ex && ex.muscle === m; })).length;
+    return { m, due, trainCount, r: Math.random() };
+  }).sort((a, b) => (b.due - a.due) || (a.trainCount - b.trainCount) || (b.r - a.r));
+  const chosenMuscles = [];
+  let remaining = 6;
+  ranked.forEach(({ m }, i) => {
+    if (remaining <= 0) return;
+    const n = (i === 0 && (MUSCLE_POOLS[m] || []).length >= 2 && remaining >= 2) ? 2 : 1;
+    chosenMuscles.push(m);
+    remaining -= n;
+  });
+  const entries = [];
+  chosenMuscles.forEach((m, i) => {
+    const n = (i === 0 && (MUSCLE_POOLS[m] || []).length >= 2) ? 2 : 1;
+    equipFilteredPool(MUSCLE_POOLS[m] || []).slice(0, n).forEach((exId) => {
+      const ex = EXERCISES[exId];
+      const reps = ex.load === "time" ? backfillReps(exId, realHistory) : backfillReps(exId, realHistory);
+      const setsCount = (ex.ladder ? rungTarget(ex, exId).sets : ex.target.sets) || 3;
+      const sets = Array.from({ length: setsCount }, () => ({ reps, load: null, unit: null, rpe: null }));
+      const e = { exId, sets };
+      if (ex.ladder) e.variation = assignedVariation(exId); // current rung only — never advanced
+      entries.push(e);
+    });
+  });
+  const titleMuscles = chosenMuscles.slice(0, 3);
+  const title = joinNice(titleMuscles.map((m) => MUSCLE_DISPLAY[m])) || "Full body";
+  return {
+    id: Date.now() + Math.floor(Math.random() * 1000), date: dateStr, sessionKey: title, entries,
+    note: "Approximated — backfilled after a saving gap, exact sets/reps not recorded", _m: Date.now(),
+  };
+}
+// Evenly spreads N sessions/week across [startDate, endDate], skipping any date that already has
+// a real logged workout (never overwrite or double up real data).
+function computeBackfillDates(startDate, endDate, perWeek) {
+  const start = new Date(startDate.replace(/-/g, "/")), end = new Date(endDate.replace(/-/g, "/"));
+  const totalDays = Math.round((end - start) / 86400000) + 1;
+  if (totalDays <= 0 || perWeek <= 0) return [];
+  const totalSessions = Math.max(1, Math.round((totalDays / 7) * perWeek));
+  const existingDates = new Set(S.workouts.map((w) => w.date));
+  const dates = [];
+  const step = totalDays / totalSessions;
+  for (let i = 0; i < totalSessions; i++) {
+    const dayOffset = Math.min(totalDays - 1, Math.round(i * step));
+    const d = new Date(start.getTime() + dayOffset * 86400000);
+    const ds = toDate(d.getTime());
+    if (!existingDates.has(ds) && !dates.includes(ds)) dates.push(ds);
+  }
+  return dates;
+}
+function buildBackfillPreview(startDate, endDate, perWeek) {
+  const dates = computeBackfillDates(startDate, endDate, perWeek);
+  const realHistory = S.workouts.slice(); // fixed reference point for "last real reps" — doesn't grow with fabricated entries
+  const workoutsSoFar = S.workouts.slice();
+  const sessions = [];
+  dates.forEach((dateStr) => {
+    const sess = generateBackfillSession(dateStr, workoutsSoFar, realHistory);
+    sessions.push(sess);
+    workoutsSoFar.push(sess); // so the NEXT date's rotation sees this one as already trained
+  });
+  workoutsSoFar.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  return sessions;
+}
 // Assembles today's session live from what's actually due — no fixed deck. Looks at which
 // muscles haven't been trained recently (weighted by MUSCLE_TARGETS priority), today's
 // readiness, and pain flags, the same way a trainer would eyeball you before picking the day's
@@ -1175,9 +1283,18 @@ function setIncline(v, date) {
 function mondayOf(d) { const x = new Date(d); const day = (x.getDay() + 6) % 7; x.setHours(0,0,0,0); x.setDate(x.getDate() - day); return x; }
 function weekStartStr(d) { return toDate(mondayOf(d).getTime()); }
 // sessions grouped by week-start; returns last `n` weeks oldest→newest as {week, count}
+// Prehab/mobility counts toward the weekly target alongside real strength sessions — both here
+// and in sessionsThisWeek() below. Explicitly discussed and decided: showing rehab work as a
+// separate "+N rehab/mobility" side-pill while the actual X/Y target number stayed strength-only
+// meant logging prehab never visibly moved the number the user is actually looking at — reported
+// directly, twice, as "0/4 still showing up" after logging prehab. A/B/C rotation and deload/
+// momentum logic still key off S.workouts alone (unaffected) — only the weekly TARGET count and
+// its streak change here.
 function weeklySessions(n) {
   const counts = {};
-  S.workouts.forEach((w) => { const k = weekStartStr(new Date(w.date.replace(/-/g, "/"))); counts[k] = (counts[k] || 0) + 1; });
+  const bump = (dateStr) => { const k = weekStartStr(new Date(dateStr.replace(/-/g, "/"))); counts[k] = (counts[k] || 0) + 1; };
+  S.workouts.forEach((w) => bump(w.date));
+  (S.activity || []).forEach((a) => bump(a.date));
   const out = [];
   const base = mondayOf(new Date());
   for (let i = n - 1; i >= 0; i--) {
@@ -1187,7 +1304,12 @@ function weeklySessions(n) {
   }
   return out;
 }
-function sessionsThisWeek() { const k = weekStartStr(new Date()); return S.workouts.filter((w) => weekStartStr(new Date(w.date.replace(/-/g, "/"))) === k).length; }
+function sessionsThisWeek() {
+  const k = weekStartStr(new Date());
+  const w = S.workouts.filter((w) => weekStartStr(new Date(w.date.replace(/-/g, "/"))) === k).length;
+  const a = (S.activity || []).filter((a) => weekStartStr(new Date(a.date.replace(/-/g, "/"))) === k).length;
+  return w + a;
+}
 function activityThisWeek() { const k = weekStartStr(new Date()); return (S.activity || []).filter((a) => weekStartStr(new Date(a.date.replace(/-/g, "/"))) === k).length; }
 function targetStreakWeeks() {
   const tgt = S.profile.weeklyTarget || 4;
@@ -1555,10 +1677,13 @@ function renderToday() {
        ${(ci.pains || []).filter((p) => p.sev > 0).length ? `<span class="pill bad">${(ci.pains || []).filter((p) => p.sev > 0).length} pain flag(s)</span>` : `<span class="pill good">No pain flags</span>`}`
     : `<span class="pill warn">No check-in</span>`;
 
+  // sessionsThisWeek() already folds prehab/mobility into this count (see its comment) — actPill
+  // is now a BREAKDOWN of that same number ("of which"), not additional credit on top of it, so
+  // it can never read as double-counting the same sessions.
   const sw = sessionsThisWeek(), wt = S.profile.weeklyTarget || 4;
   const weekPill = `<span class="pill ${sw >= wt ? "good" : "acc"}">Week ${sw}/${wt}</span>`;
   const actWk = activityThisWeek();
-  const actPill = actWk ? `<span class="pill">+${actWk} rehab/mobility</span>` : "";
+  const actPill = actWk ? `<span class="pill">incl. ${actWk} rehab/mobility</span>` : "";
   const whyText = sess.reasons.length ? sess.reasons.join(" ") : "Balanced session — nothing especially overdue or flagged today.";
   let html = `
     <div class="masthead">
@@ -2690,6 +2815,20 @@ function buildExport() {
   return md;
 }
 
+// Transient preview state for the bulk-backfill tool — not part of S; a preview is generated,
+// shown for review, then either discarded (never saved) or explicitly committed.
+let BF_PREVIEW = null;
+function BF_START_DEFAULT() {
+  const last = S.workouts.length ? S.workouts[S.workouts.length - 1].date : null;
+  if (!last) return toDate(Date.now() - 8 * 86400000);
+  return toDate(new Date(last.replace(/-/g, "/")).getTime() + 86400000);
+}
+function commitBackfill(sessions) {
+  sessions.forEach((s) => insertWorkoutSorted(s));
+  S.todaySession = null;
+  S._m = Date.now();
+  save();
+}
 // Transient selection state for the backdate exercise picker — not part of S, reset each visit.
 let BD_PICK = new Set();
 function renderBackdatePicker(date) {
@@ -2829,6 +2968,22 @@ function renderMore() {
         <input id="bd-date" type="date" max="${esc(today())}" value="${esc(yesterday())}"/></label>
       <button class="btn ghost" id="bd-go" style="margin-top:10px">Pick exercises →</button>
     </div>
+    <div class="blk-title"><span class="dot"></span>Backfill a gap of missing days</div>
+    <div class="card">
+      <div class="small muted">For a stretch where sessions genuinely happened but never saved (a bug, a device issue) and you don't remember exact numbers day by day. This fills in APPROXIMATE sessions — real muscle rotation, but reps default to your last known real numbers, not new PRs. Marked as approximated in your history. It never touches ladder rungs or a date that already has a real logged workout.</div>
+      <div class="grid2" style="margin-top:12px">
+        <label class="fld"><span class="lt">From</span><input id="bf-start" type="date" max="${esc(today())}" value="${esc(BF_START_DEFAULT())}"/></label>
+        <label class="fld"><span class="lt">To</span><input id="bf-end" type="date" max="${esc(today())}" value="${esc(yesterday())}"/></label>
+      </div>
+      <label class="fld" style="margin-top:10px"><span class="lt">Sessions per week (best guess)</span>
+        <input id="bf-perweek" inputmode="numeric" value="${esc(S.profile.weeklyTarget || 4)}"/></label>
+      ${BF_PREVIEW ? `
+        <div class="tiny muted" style="margin-top:12px">Preview — ${BF_PREVIEW.length} session${BF_PREVIEW.length === 1 ? "" : "s"}. Nothing is saved yet.</div>
+        <div class="card tight" style="margin-top:8px">${BF_PREVIEW.map((s) => `<div class="row small" style="padding:6px 0;border-top:1px solid var(--line)"><span class="muted">${prettyDate(s.date)}</span><span>${esc(s.sessionKey)} · ${s.entries.length} ex</span></div>`).join("")}</div>
+        <button class="btn good" id="bf-confirm" style="margin-top:12px">Add these ${BF_PREVIEW.length} sessions</button>
+        <button class="btn ghost" id="bf-cancel" style="margin-top:8px">Discard preview</button>
+      ` : `<button class="btn ghost" id="bf-preview" style="margin-top:12px">Preview →</button>`}
+    </div>
     <div class="blk-title"><span class="dot"></span>Weekly review export</div>
     <div class="card">
       <div class="small muted">Copies a summary of the week to paste back for re-tuning.</div>
@@ -2881,6 +3036,29 @@ function renderMore() {
     if (d > today()) { toast("Can't backdate to the future"); return; }
     renderBackdatePicker(d);
   };
+  const bfPreviewBtn = document.getElementById("bf-preview");
+  if (bfPreviewBtn) bfPreviewBtn.onclick = () => {
+    const start = document.getElementById("bf-start").value;
+    const end = document.getElementById("bf-end").value;
+    const perWeek = Number(document.getElementById("bf-perweek").value) || S.profile.weeklyTarget || 4;
+    if (!start || !end) { toast("Pick both dates"); return; }
+    if (start > end) { toast("Start date is after end date"); return; }
+    if (end >= today()) { toast("End date must be before today"); return; }
+    const sessions = buildBackfillPreview(start, end, perWeek);
+    if (!sessions.length) { toast("No days to fill — every date in range already has a real session, or the range is too short"); return; }
+    BF_PREVIEW = sessions;
+    renderMore();
+  };
+  const bfConfirmBtn = document.getElementById("bf-confirm");
+  if (bfConfirmBtn) bfConfirmBtn.onclick = () => {
+    const n = BF_PREVIEW.length;
+    commitBackfill(BF_PREVIEW);
+    BF_PREVIEW = null;
+    toast(`Added ${n} approximated session${n === 1 ? "" : "s"}`);
+    renderMore();
+  };
+  const bfCancelBtn = document.getElementById("bf-cancel");
+  if (bfCancelBtn) bfCancelBtn.onclick = () => { BF_PREVIEW = null; renderMore(); };
   document.getElementById("exp-copy").onclick = async () => {
     const md = buildExport();
     try { await navigator.clipboard.writeText(md); toast("Copied — paste to Claude"); }
