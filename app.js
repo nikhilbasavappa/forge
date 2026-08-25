@@ -2968,4 +2968,23 @@ if ("serviceWorker" in navigator) {
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) navigator.serviceWorker.getRegistration().then((reg) => reg && reg.update()).catch(() => {});
   });
+  // The missing half of the update story: reg.update() finding a new sw.js, and that sw.js's own
+  // install handler calling skipWaiting(), together get a new service worker ACTIVATED — but
+  // activating doesn't change what code is actually RUNNING in an already-open tab. A page keeps
+  // executing the app.js it originally loaded until it does a real reload. For a PWA opened from
+  // a home-screen icon — routinely backgrounded and foregrounded, rarely fully force-quit and
+  // relaunched — that reload might never happen on its own, so a real, already-shipped fix could
+  // sit "installed" but never actually take effect for weeks. This is exactly how "Finish & Save"
+  // silently failing kept happening on a real device long after the underlying bug was fixed and
+  // deployed. `controllerchange` fires the moment a new SW actually takes control — force a
+  // reload right then so the newly-active code is what's actually running, unprompted. Safe to do
+  // unconditionally: RUN (an in-progress session) is persisted continuously via saveRun() and
+  // restored on boot, so this can cost at most whatever's mid-keystroke in an unmarked field, not
+  // the session itself.
+  let swRefreshed = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (swRefreshed) return;
+    swRefreshed = true;
+    window.location.reload();
+  });
 }
