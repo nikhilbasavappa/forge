@@ -733,33 +733,50 @@ function generateBackfillSession(dateStr, workoutsSoFar, realHistory) {
 }
 // Evenly spreads N sessions/week across [startDate, endDate], skipping any date that already has
 // a real logged workout (never overwrite or double up real data).
-function computeBackfillDates(startDate, endDate, perWeek) {
+// All dates in [startDate, endDate] that don't already have a real logged workout — the full set
+// the day-picker offers, not what gets filled. Order-preserving, oldest first.
+function backfillRangeDates(startDate, endDate) {
   const start = new Date(startDate.replace(/-/g, "/")), end = new Date(endDate.replace(/-/g, "/"));
   const totalDays = Math.round((end - start) / 86400000) + 1;
-  if (totalDays <= 0 || perWeek <= 0) return [];
-  const totalSessions = Math.max(1, Math.round((totalDays / 7) * perWeek));
+  if (totalDays <= 0) return [];
   const existingDates = new Set(S.workouts.map((w) => w.date));
   const dates = [];
-  const step = totalDays / totalSessions;
-  for (let i = 0; i < totalSessions; i++) {
-    const dayOffset = Math.min(totalDays - 1, Math.round(i * step));
-    const d = new Date(start.getTime() + dayOffset * 86400000);
-    const ds = toDate(d.getTime());
-    if (!existingDates.has(ds) && !dates.includes(ds)) dates.push(ds);
+  for (let i = 0; i < totalDays; i++) {
+    const ds = toDate(start.getTime() + i * 86400000);
+    if (!existingDates.has(ds)) dates.push(ds);
   }
   return dates;
 }
-function buildBackfillPreview(startDate, endDate, perWeek) {
-  const dates = computeBackfillDates(startDate, endDate, perWeek);
+// A starting SUGGESTION only — evenly spread perWeek sessions across the range — for pre-
+// checking the day-picker so there's less tapping, not a rule the user is bound to. Every day
+// stays individually toggleable; this just decides which start out checked.
+function suggestBackfillDates(startDate, endDate, perWeek) {
+  const all = backfillRangeDates(startDate, endDate);
+  const totalDays = all.length ? (new Date(all[all.length - 1].replace(/-/g, "/")) - new Date(all[0].replace(/-/g, "/"))) / 86400000 + 1 : 0;
+  if (!all.length || perWeek <= 0) return new Set();
+  const totalSessions = Math.max(1, Math.min(all.length, Math.round((totalDays / 7) * perWeek)));
+  const start = new Date(startDate.replace(/-/g, "/"));
+  const step = totalDays / totalSessions;
+  const picked = new Set();
+  for (let i = 0; i < totalSessions; i++) {
+    const dayOffset = Math.min(totalDays - 1, Math.round(i * step));
+    const ds = toDate(start.getTime() + dayOffset * 86400000);
+    if (all.includes(ds)) picked.add(ds);
+  }
+  return picked;
+}
+// dates: explicit, user-picked array of date strings (NOT a frequency guess) — the whole point
+// of the day-picker is that only days the user actually confirms get filled, nothing implied.
+function buildBackfillPreview(dates) {
+  const sorted = dates.slice().sort();
   const realHistory = S.workouts.slice(); // fixed reference point for "last real reps" — doesn't grow with fabricated entries
   const workoutsSoFar = S.workouts.slice();
   const sessions = [];
-  dates.forEach((dateStr) => {
+  sorted.forEach((dateStr) => {
     const sess = generateBackfillSession(dateStr, workoutsSoFar, realHistory);
     sessions.push(sess);
     workoutsSoFar.push(sess); // so the NEXT date's rotation sees this one as already trained
   });
-  workoutsSoFar.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   return sessions;
 }
 // Assembles today's session live from what's actually due — no fixed deck. Looks at which
@@ -2815,8 +2832,22 @@ function buildExport() {
   return md;
 }
 
-// Transient preview state for the bulk-backfill tool — not part of S; a preview is generated,
-// shown for review, then either discarded (never saved) or explicitly committed.
+// Removing a logged workout entirely — needed once backfill (or anything else) can add a session
+// that turns out to be wrong (e.g. a day that was actually a real rest day). Undoes exactly what
+// insertWorkoutSorted() did; also invalidates the cached today-session the same way finishRun()
+// does, since removing a workout changes what "days since trained" should say.
+function deleteWorkout(id) {
+  S.workouts = S.workouts.filter((w) => w.id !== id);
+  S.todaySession = null;
+  S._m = Date.now();
+  save();
+}
+// Transient day-picker state for the bulk-backfill tool — not part of S. BF_RANGE holds the
+// {start,end} the picker is currently showing every day of; BF_SELECTED is which of those days
+// are checked — starts pre-checked with an even-spread suggestion (see suggestBackfillDates()),
+// but every day is individually toggleable, and nothing is generated/saved until confirmed.
+let BF_RANGE = null;
+let BF_SELECTED = null;
 let BF_PREVIEW = null;
 function BF_START_DEFAULT() {
   const last = S.workouts.length ? S.workouts[S.workouts.length - 1].date : null;
@@ -2970,20 +3001,38 @@ function renderMore() {
     </div>
     <div class="blk-title"><span class="dot"></span>Backfill a gap of missing days</div>
     <div class="card">
-      <div class="small muted">For a stretch where sessions genuinely happened but never saved (a bug, a device issue) and you don't remember exact numbers day by day. This fills in APPROXIMATE sessions — real muscle rotation, but reps default to your last known real numbers, not new PRs. Marked as approximated in your history. It never touches ladder rungs or a date that already has a real logged workout.</div>
-      <div class="grid2" style="margin-top:12px">
-        <label class="fld"><span class="lt">From</span><input id="bf-start" type="date" max="${esc(today())}" value="${esc(BF_START_DEFAULT())}"/></label>
-        <label class="fld"><span class="lt">To</span><input id="bf-end" type="date" max="${esc(today())}" value="${esc(yesterday())}"/></label>
-      </div>
-      <label class="fld" style="margin-top:10px"><span class="lt">Sessions per week (best guess)</span>
-        <input id="bf-perweek" inputmode="numeric" value="${esc(S.profile.weeklyTarget || 4)}"/></label>
+      <div class="small muted">For a stretch where sessions genuinely happened but never saved (a bug, a device issue). Pick exactly which days you actually trained — nothing is guessed or auto-spread; days you leave unchecked stay empty. Reps default to your last known real numbers, not new PRs, and it never touches ladder rungs or a date that already has a real logged workout.</div>
       ${BF_PREVIEW ? `
         <div class="tiny muted" style="margin-top:12px">Preview — ${BF_PREVIEW.length} session${BF_PREVIEW.length === 1 ? "" : "s"}. Nothing is saved yet.</div>
         <div class="card tight" style="margin-top:8px">${BF_PREVIEW.map((s) => `<div class="row small" style="padding:6px 0;border-top:1px solid var(--line)"><span class="muted">${prettyDate(s.date)}</span><span>${esc(s.sessionKey)} · ${s.entries.length} ex</span></div>`).join("")}</div>
         <button class="btn good" id="bf-confirm" style="margin-top:12px">Add these ${BF_PREVIEW.length} sessions</button>
         <button class="btn ghost" id="bf-cancel" style="margin-top:8px">Discard preview</button>
-      ` : `<button class="btn ghost" id="bf-preview" style="margin-top:12px">Preview →</button>`}
+      ` : BF_RANGE ? `
+        <div class="tiny muted" style="margin-top:12px">Tap to toggle each day — pre-checked using your ${esc(S.profile.weeklyTarget || 4)}/week default, but nothing is filled unless it's checked here. ${BF_SELECTED.size} of ${backfillRangeDates(BF_RANGE.start, BF_RANGE.end).length} day(s) selected.</div>
+        <div class="flags" style="margin-top:10px">
+          ${backfillRangeDates(BF_RANGE.start, BF_RANGE.end).map((d) => `<button class="flagbtn bf-day ${BF_SELECTED.has(d) ? "on" : ""}" data-day="${esc(d)}">${esc(prettyDate(d))}</button>`).join("")}
+        </div>
+        <button class="btn good" id="bf-genpreview" style="margin-top:12px">Preview ${BF_SELECTED.size} session${BF_SELECTED.size === 1 ? "" : "s"} →</button>
+        <button class="btn ghost" id="bf-back" style="margin-top:8px">← Change date range</button>
+      ` : `
+        <div class="grid2" style="margin-top:12px">
+          <label class="fld"><span class="lt">From</span><input id="bf-start" type="date" max="${esc(today())}" value="${esc(BF_START_DEFAULT())}"/></label>
+          <label class="fld"><span class="lt">To</span><input id="bf-end" type="date" max="${esc(today())}" value="${esc(yesterday())}"/></label>
+        </div>
+        <label class="fld" style="margin-top:10px"><span class="lt">Sessions per week (just for the starting suggestion)</span>
+          <input id="bf-perweek" inputmode="numeric" value="${esc(S.profile.weeklyTarget || 4)}"/></label>
+        <button class="btn ghost" id="bf-showdays" style="margin-top:12px">Show days →</button>
+      `}
     </div>
+    ${(() => {
+      const approx = S.workouts.filter((w) => w.note && /approximated/i.test(w.note));
+      if (!approx.length) return "";
+      return `<div class="blk-title"><span class="dot"></span>Backfilled sessions</div>
+      <div class="card">
+        <div class="small muted">Approximated entries currently in your history. Remove any that shouldn't be there — a day you actually rested, or one that landed on the wrong date.</div>
+        <div class="card tight" style="margin-top:10px">${approx.map((w) => `<div class="row small" style="padding:6px 0;border-top:1px solid var(--line)"><span class="muted">${prettyDate(w.date)} — ${esc(w.sessionKey)}</span><button class="linkbtn bf-remove" data-id="${w.id}">Remove</button></div>`).join("")}</div>
+      </div>`;
+    })()}
     <div class="blk-title"><span class="dot"></span>Weekly review export</div>
     <div class="card">
       <div class="small muted">Copies a summary of the week to paste back for re-tuning.</div>
@@ -3036,17 +3085,32 @@ function renderMore() {
     if (d > today()) { toast("Can't backdate to the future"); return; }
     renderBackdatePicker(d);
   };
-  const bfPreviewBtn = document.getElementById("bf-preview");
-  if (bfPreviewBtn) bfPreviewBtn.onclick = () => {
+  const bfShowDaysBtn = document.getElementById("bf-showdays");
+  if (bfShowDaysBtn) bfShowDaysBtn.onclick = () => {
     const start = document.getElementById("bf-start").value;
     const end = document.getElementById("bf-end").value;
     const perWeek = Number(document.getElementById("bf-perweek").value) || S.profile.weeklyTarget || 4;
     if (!start || !end) { toast("Pick both dates"); return; }
     if (start > end) { toast("Start date is after end date"); return; }
     if (end >= today()) { toast("End date must be before today"); return; }
-    const sessions = buildBackfillPreview(start, end, perWeek);
-    if (!sessions.length) { toast("No days to fill — every date in range already has a real session, or the range is too short"); return; }
-    BF_PREVIEW = sessions;
+    const days = backfillRangeDates(start, end);
+    if (!days.length) { toast("No days available — every date in range already has a real session"); return; }
+    BF_RANGE = { start, end };
+    BF_SELECTED = suggestBackfillDates(start, end, perWeek);
+    renderMore();
+  };
+  document.querySelectorAll(".bf-day").forEach((b) => b.onclick = () => {
+    const d = b.dataset.day;
+    if (BF_SELECTED.has(d)) BF_SELECTED.delete(d); else BF_SELECTED.add(d);
+    renderMore();
+  });
+  const bfBackBtn = document.getElementById("bf-back");
+  if (bfBackBtn) bfBackBtn.onclick = () => { BF_RANGE = null; BF_SELECTED = null; renderMore(); };
+  const bfGenPreviewBtn = document.getElementById("bf-genpreview");
+  if (bfGenPreviewBtn) bfGenPreviewBtn.onclick = () => {
+    if (!BF_SELECTED.size) { toast("Check at least one day first"); return; }
+    BF_PREVIEW = buildBackfillPreview(Array.from(BF_SELECTED));
+    BF_RANGE = null; BF_SELECTED = null;
     renderMore();
   };
   const bfConfirmBtn = document.getElementById("bf-confirm");
@@ -3059,6 +3123,11 @@ function renderMore() {
   };
   const bfCancelBtn = document.getElementById("bf-cancel");
   if (bfCancelBtn) bfCancelBtn.onclick = () => { BF_PREVIEW = null; renderMore(); };
+  document.querySelectorAll(".bf-remove").forEach((b) => b.onclick = () => {
+    deleteWorkout(+b.dataset.id);
+    toast("Removed");
+    renderMore();
+  });
   document.getElementById("exp-copy").onclick = async () => {
     const md = buildExport();
     try { await navigator.clipboard.writeText(md); toast("Copied — paste to Claude"); }
