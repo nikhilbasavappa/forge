@@ -641,6 +641,40 @@ function bodyCompStalled() {
   if (sessionsInWindow < 6) return null; // hasn't trained enough to draw a conclusion either way
   return "Weight/waist hasn't moved in a few weeks despite consistent training — that's usually a nutrition signal (protein, portions, deficit), not a reason to add more volume.";
 }
+// Synthesizes several signals that already exist separately (adherence pace, per-muscle stall/
+// neglect, body-comp stall, protein adherence) into one short automatic read — the same kind of
+// skim a trainer would do over your week, generated locally from your own data every time
+// Progress is opened. Nothing here is new math; it's judgment applied to numbers already tracked.
+function coachRead() {
+  const notes = []; // { lvl: "good" | "warn" | "acc", text }
+  const wt = S.profile.weeklyTarget || 4, sw = sessionsThisWeek(), streak = targetStreakWeeks();
+  const dow = new Date().getDay(); // 0=Sun..6=Sat
+  const daysIntoWeek = dow === 0 ? 7 : dow; // Mon=1..Sun=7
+  if (sw >= wt) notes.push({ lvl: "good", text: `Week's target already hit — ${sw}/${wt}${streak > 1 ? `, ${streak}-week streak` : ""}.` });
+  else if (daysIntoWeek >= 5) notes.push({ lvl: "warn", text: `Behind pace this week — ${sw}/${wt} with the week almost over.` });
+  else if (streak > 1) notes.push({ lvl: "good", text: `${streak}-week on-target streak going.` });
+
+  Object.keys(MUSCLE_TARGETS).forEach((m) => {
+    if (muscleStalled(m)) { notes.push({ lvl: "warn", text: `${MUSCLE_DISPLAY[m]} hasn't grown in ~3 weeks despite real training — worth swapping the exercise or taking a deload week.` }); return; }
+    const d = daysSinceMuscle(m);
+    if (d < 999 && d > MUSCLE_TARGETS[m] * 2.5) notes.push({ lvl: "warn", text: `${MUSCLE_DISPLAY[m]} hasn't been trained in ${d}d — significantly overdue for its usual cadence.` });
+  });
+
+  const bcs = bodyCompStalled();
+  if (bcs) notes.push({ lvl: "warn", text: bcs });
+
+  const recentProtein = S.nutrition.filter((n) => daysAgo(n.date) <= 7 && n.protein != null);
+  if (recentProtein.length >= 3 && S.profile.proteinTarget) {
+    const avg = recentProtein.reduce((s, n) => s + (+n.protein || 0), 0) / recentProtein.length;
+    if (avg < S.profile.proteinTarget * 0.8) notes.push({ lvl: "warn", text: `Protein averaging ${Math.round(avg)}g/day over the last week, target is ${S.profile.proteinTarget}g — a real gap, not noise.` });
+  }
+
+  const pN = prsSince(7);
+  if (pN > 0) notes.push({ lvl: "good", text: `${pN} PR${pN === 1 ? "" : "s"} in the last 7 days.` });
+
+  if (!notes.length) notes.push({ lvl: "acc", text: "Nothing flagged — steady as it goes." });
+  return notes;
+}
 // Least-recently-used pick from a pool, with a random tie-break so equally-stale options
 // (most commonly "never done") don't always resolve to the same exercise.
 function pickLRU(pool, n) {
@@ -2608,8 +2642,11 @@ function renderProgress() {
   const wt = S.profile.weeklyTarget || 4, sw = sessionsThisWeek(), streak = targetStreakWeeks();
   const weeks = weeklySessions(8).map((w) => ({ label: w.week.slice(5).replace("-", "/"), v: w.count, hi: w.count >= wt }));
   const np = S.nutrition.filter((n) => n.protein != null).slice(-14).map((n) => ({ label: n.date.slice(5).replace("-", "/"), v: +n.protein, hi: (+n.protein) >= (S.profile.proteinTarget || 0) }));
+  const coach = coachRead();
 
   VIEW.innerHTML = `
+    <div class="blk-title"><span class="dot"></span>Coach's read</div>
+    <div class="card">${coach.map((n) => `<div class="row small" style="padding:6px 0;border-top:1px solid var(--line)"><span class="pill ${n.lvl}" style="flex-shrink:0;margin-right:8px">${n.lvl === "good" ? "✓" : n.lvl === "warn" ? "!" : "•"}</span><span>${esc(n.text)}</span></div>`).join("")}</div>
     <div class="blk-title"><span class="dot"></span>At a glance</div>
     <div class="card">
       <div class="lt">Last 7 days</div>
