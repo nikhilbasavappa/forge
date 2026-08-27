@@ -1,6 +1,11 @@
 /* app.js — Forge. No build step, no deps. Data lives in localStorage. */
 "use strict";
 
+// Bump alongside sw.js's CACHE on every deploy. Shown in More so it's possible to confirm which
+// build is ACTUALLY running on a given device at a glance — no more guessing whether a fix has
+// really reached a phone that's been stuck on stale cached code before (see forge-v92/v97).
+const APP_BUILD = "v98";
+
 const KEY = "forge.v1";
 const DEFAULT_STATE = {
   v: 1,
@@ -3005,7 +3010,7 @@ function ladderDebugHTML() {
 }
 function renderMore() {
   TITLE.textContent = "More";
-  SUB.textContent = "Review · sync · export";
+  SUB.textContent = `Review · sync · export · build ${APP_BUILD}`;
   VIEW.innerHTML = `
     <button class="btn good" id="open-review" style="margin:6px 0 4px">Weekly review →</button>
     <button class="btn ghost" id="open-help" style="margin:8px 0 4px">Help &amp; guide</button>
@@ -3110,7 +3115,7 @@ function renderMore() {
       <button class="btn" id="p-save" style="margin-top:12px">Save profile</button>
     </div>
     <div class="card tight center tiny muted">
-      Forge · program v${PROGRAM_VERSION} · ${S.workouts.length} workouts, ${S.checkins.length} check-ins<br/>
+      Forge ${APP_BUILD} · program v${PROGRAM_VERSION} · ${S.workouts.length} workouts, ${S.checkins.length} check-ins<br/>
       <a class="lnk" id="reset">Reset all data</a>
     </div>
     <div id="exp-out"></div>`;
