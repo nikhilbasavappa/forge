@@ -3014,7 +3014,8 @@ function renderMore() {
       <div class="small muted" id="sync-status">${esc(syncStatusText())}</div>
       ${syncEmptyWarn ? `<div class="banner warn"><div>No data found for this passphrase — it's either brand new, or there's a typo. The passphrase is matched exactly as typed (one wrong letter = a totally different, empty account). If you've synced before, double-check for a typo before logging fresh data here.</div></div>` : ""}
       <label class="fld"><span class="lt">Passphrase (same on every device)</span>
-        <input id="sync-key" type="password" placeholder="8+ characters" value="${esc(SY.key || "")}"/></label>
+        <input id="sync-key" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="8+ characters" value="${esc(SY.key || "")}"/></label>
+      <div class="tiny muted" style="margin-top:4px">Shown in plain text on purpose — masking it made it impossible to tell if what you typed actually matched, and a single mismatched character here silently creates a whole new empty account with no error. This is a shared lookup key for your own data, not a login password.</div>
       <button class="btn" id="sync-connect" style="margin-top:12px">${SY.key ? "Sync now" : "Connect & sync"}</button>
       ${SY.key ? `<button class="btn ghost" id="sync-off" style="margin-top:8px">Disconnect this device</button>` : ""}
       <div class="tiny muted" style="margin-top:10px">Use the same passphrase on each device to share data. Anyone with it can read your log, so make it long. Data syncs on open, on change, and when you return to the app.</div>
@@ -3202,14 +3203,20 @@ function renderMore() {
   document.getElementById("sync-connect").onclick = async () => {
     const k = document.getElementById("sync-key").value.trim();
     if (k.length < 8) { toast("Passphrase: 8+ characters"); return; }
-    const isNewKey = k !== SY.key;
     SY.key = k; SY.url = SY.url || SYNC_ENDPOINT; saveSync();
     await syncNow();
     // The passphrase is used as a literal storage key (no fuzzy match) — a typo silently
     // creates a brand-new, empty account instead of erroring. Surface that with a persistent
     // banner (a toast alone disappears in ~2s, too fast for something this consequential).
+    // Previously only shown when the KEY itself was new (isNewKey) — but that meant a REPEAT
+    // sync on an already-saved key that comes back empty (the remote copy genuinely has nothing,
+    // whatever the reason) reported a plain "Synced" with no indication anything was wrong,
+    // reported directly: "I typed in my passphrase several times, hit sync now. Nothing." — the
+    // sync itself was "succeeding" (no error), it just had nothing to actually restore, and the
+    // UI never said so. This now fires every time, new key or not — an empty result is always
+    // worth surfacing, not just the first time a key is entered.
     const empty = !S.workouts.length && !S.checkins.length && !S.measurements.length && !(S.activity || []).length;
-    syncEmptyWarn = syncState === "ok" && isNewKey && empty;
+    syncEmptyWarn = syncState === "ok" && empty;
     toast(syncState === "ok" ? (syncEmptyWarn ? "Connected — but no data found" : "Synced") : "Sync: " + syncMsg);
     renderMore();
   };
