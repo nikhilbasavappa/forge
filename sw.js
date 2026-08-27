@@ -1,5 +1,5 @@
 /* sw.js — offline app shell + buddy push. Bump CACHE when files change to force update. */
-const CACHE = "forge-v96";
+const CACHE = "forge-v97";
 const SYNC_BASE = "https://forge-sync.nikvbas.workers.dev";
 const ASSETS = [
   "./", "./index.html", "./styles.css", "./program.js", "./app.js",
@@ -28,6 +28,17 @@ self.addEventListener("activate", (e) => {
 });
 self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
+  // Only ever cache same-origin app-shell requests (index.html, app.js, etc — the ASSETS list).
+  // A cross-origin request — the sync worker's /state, buddy /group, /pending — must NEVER be
+  // served from this cache: caches.match() matches purely by URL, completely ignoring headers,
+  // so a single earlier GET to forge-sync.../state (whatever Authorization it carried, even an
+  // empty/failed attempt) would get cached and then silently served FOREVER for every later
+  // request to that exact URL, regardless of what Authorization header a later request actually
+  // sends. This is almost certainly the real mechanism behind "same passphrase, one device sees
+  // the data, another always gets 'no data found' no matter how many times it's retyped correctly"
+  // — whichever device happened to cache an empty response first was stuck seeing that one
+  // frozen response forever after, with no way for a correct retry to ever reach the network.
+  if (new URL(e.request.url).origin !== self.location.origin) return; // let the browser fetch it directly — no caching, ever
   e.respondWith(
     caches.match(e.request).then((hit) =>
       hit || fetch(e.request).then((res) => {
